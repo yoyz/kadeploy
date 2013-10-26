@@ -1,0 +1,11 @@
+#!/usr/bin/perl
+
+use strict;
+use warnings;
+use libkadeploy2::kapxe;
+
+libkadeploy2::kapxe::get_options_cmdline();
+exit libkadeploy2::kapxe::run();
+
+################################################################################
+

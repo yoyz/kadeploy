@@ -1,0 +1,7 @@
+#!/usr/bin/perl
+use libkadeploy2::kareboot;
+use strict;
+use warnings;
+
+libkadeploy2::kareboot::get_options_cmdline();
+exit libkadeploy2::kareboot::run();

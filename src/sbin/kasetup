@@ -1,0 +1,13 @@
+#!/usr/bin/perl
+use strict;
+use warnings;
+use libkadeploy2::kasetup;
+
+libkadeploy2::kasetup::get_options_cmdline();
+exit libkadeploy2::kasetup::run();
+
+
+
+################################################################################
+
+

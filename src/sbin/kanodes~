@@ -1,0 +1,311 @@
+#!/usr/bin/perl
+
+use Getopt::Long;
+use libkadeploy2::deploy_iolib;
+use libkadeploy2::conflib;
+use libkadeploy2::nodesfile;
+use libkadeploy2::disk;
+use libkadeploy2::node;
+use libkadeploy2::message;
+
+use strict;
+use warnings;
+
+sub loadnodesfile($);
+sub loadpartitionfile($);
+sub updatedeployedtable();
+sub usage();
+sub listnodes();
+sub delpartitiontable();
+sub listpartition($);
+sub nodetoadd($);
+sub nodetodel($);
+
+my $nodesdir="/etc/kadeploy/nodes";
+my @hostlist;	     
+my $help;
+my $listnode;
+my $listpartition;
+my $iwanthelp=1;
+my $retcode;
+my $add;
+my $del;
+my $message=libkadeploy2::message::new();
+
+GetOptions('m=s'            => \@hostlist,
+	   'h!'             => \$help,
+	   'add!'           => \$add,
+	   'del!'           => \$del,
+	   'listnode!'      => \$listnode,
+	   'listpartition!' => \$listpartition,
+	   );
+
+
+my $disk_id;
+my @host_id_list = ();
+my @part_env_id_list = ();
+my $ok=1;
+my $nodename;
+
+if ($help) { $message->kanodes_help(); exit 0; }
+
+if ($add)
+{
+
+    $retcode=0;
+    if (@hostlist)
+    {
+	foreach $nodename (@hostlist)
+	{
+	    if (nodetoadd($nodename)==0) { $retcode=1; }
+	}
+    }
+    else
+    {
+	$message->missing_node_cmdline(2);
+	$retcode=1;
+    }
+    exit $retcode;
+}
+
+if ($del)
+{
+    $retcode=0;
+    if (@hostlist)
+    {
+	
+	foreach $nodename (@hostlist)
+	{	    
+	    if (nodetodel($nodename)==0)
+	    {
+		$retcode=1;
+	    }
+	}
+    }
+    else
+    {
+	$message->missing_node_cmdline(2);
+	$retcode=1;
+    }
+    exit $retcode;
+}
+
+if ($listnode)
+{
+    $retcode=0;
+    listnodes();
+    exit $retcode;
+}
+
+if ($listpartition)
+{
+    $retcode=0;
+    if (@hostlist)
+    {
+	foreach $nodename (@hostlist)
+	{
+	    listpartition($nodename);
+	}
+    }
+    else
+    {
+	$message->missing_node_cmdline(2);
+	$retcode=1;
+    }
+    exit $retcode;
+}
+
+if ($iwanthelp)
+{
+    $retcode=0;
+    $message->kanodes_help();
+    exit $retcode;
+}
+
+################################################################################
+
+
+
+
+
+sub nodeexist($)
+{
+    my $nodename=shift;
+    my $ok=0;
+    my $db;
+
+    $db=libkadeploy2::deploy_iolib::new();
+    $db->connect();
+    if ($db->node_name_exist($nodename)) {$ok=1;}
+    else {$ok=0;}
+    $db->disconnect();
+    return $ok;
+}
+
+sub nodetoadd($)
+{
+    my $nodename=shift;
+    $iwanthelp=0;
+    my $disk;
+    my $node;
+    my $base;
+    my $i;
+    my $nodenamedir="$nodesdir/$nodename";
+    my $nodefile="$nodenamedir/net";
+    my $diskfileprefix="$nodenamedir/disk";
+    my $diskfile;
+    my $ok=1;
+    if (! -d $nodenamedir)   { $message->dirnotfound(2,$nodenamedir); return 0; }
+    if (! -e $nodefile)      { $message->filenotfound(2,$nodefile);   return 0; }
+
+    #print "\n";
+    #print "Deleting partition table\n";
+    #delpartitiontable();
+    #print "Checking $nodesfile\n";
+
+    $node=libkadeploy2::node::new();
+    $disk=libkadeploy2::disk::new();
+
+    $message->loadingfile(0,$nodefile);
+
+    if ($node->loadfile($nodefile))
+    { 	
+	$message->loadingfileDone(0,$nodefile);
+	$node->addtodb();     
+    }
+    else
+    { 
+	$message->loadingfilefailed(2,$nodefile);
+	$ok=0; 
+    }      
+    print "\n";
+    
+    for ($i=1;$i<5;$i++)
+    {
+	$diskfile=$diskfileprefix.$i;
+	print "Checking $diskfile\n";
+	$message->statfile(0,$diskfile);
+	if (! -e $diskfile && $i==1) 
+	{ 
+	    $message->filenotfound(2,$diskfile);
+	    return 0; 
+	}	
+	if (-e $diskfile)
+	{
+	    if (! $disk->loadfile($diskfile))   { $ok=0;}
+	    if (! $disk->addtodb($nodename,$i)) { $ok=0;}
+	}
+    }
+    
+
+    if ($ok)
+    {
+	updatedeployedtable(); 
+	return $ok;
+    }
+    else
+    {
+	print "Check your configuration files...\n";
+	return $ok;
+    }
+
+}
+
+
+
+sub nodetodel($)
+{
+    my $nodename=shift;
+    my $iwanthelp=0;
+    my $db;
+    my $diskid;
+    my $nodeid;
+    my $i;
+    my $ok=0;
+
+    $db=libkadeploy2::deploy_iolib::new();
+    $db->connect();
+    if ($db->node_name_to_id($nodename)==0)
+    {
+	$message->missing_node_db(2,$nodename);
+	exit 1;
+    }
+    else
+    {
+	$nodeid=$db->node_name_to_id($nodename);
+	for ($i=1;$i<5;$i++)
+	{
+	    $diskid=$db->get_diskid_from_nodeid_disknumber($nodeid,$i);
+	    if ($diskid)
+	    {
+		print "delete partition from $nodename\n";
+		$db->del_partition_from_diskid($diskid);
+		print "delete disk from $nodename\n";
+		$db->del_disk_from_id($diskid);
+		$ok=1;
+	    }
+	    else
+	    {
+		$message->missing_disk_db(1,$nodename);
+	    }
+	}
+	print  "delete host $nodename\n";
+	$db->del_node($nodename);
+    }
+    $db->disconnect();    
+    return $ok;
+}
+
+sub listpartition($)
+{
+    my $nodename=shift;
+    my $partsize;
+    my $partnumber=1;
+    my $i;
+    my $db = libkadeploy2::deploy_iolib::new();
+    $db->connect();
+    my $disk = libkadeploy2::disk::new();
+    for ($i=1;$i<5;$i++)
+    {
+	print "disk=$i\n";
+	$disk->get_fromdb($nodename,$i);
+	$disk->print();
+	print "\n\n";
+	$disk=libkadeploy2::disk::new();
+    }
+    $db->disconnect();
+}
+
+sub listnodes()
+{
+    my @nodelist;
+    my $node;
+    my $db = libkadeploy2::deploy_iolib::new();
+    $db->connect();
+    @nodelist=$db->list_node();
+    print STDERR "node list\n";
+    print STDERR "---------\n";
+    foreach $node (@nodelist)
+    {
+	print "$node\n";
+    }
+    $db->disconnect();					  
+}
+
+
+
+
+sub updatedeployedtable()
+{
+    my $db = libkadeploy2::deploy_iolib::new();
+    $db->connect();
+    foreach my $host (@host_id_list)
+    {
+	foreach my $part_env (@part_env_id_list)
+	{
+	    $db->add_deploy(\$part_env,$disk_id,$host);
+	  }
+    }
+    
+    $db->disconnect();    
+}

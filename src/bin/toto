@@ -1,0 +1,13 @@
+#!/usr/bin/perl
+
+use strict;
+use warnings;
+use libkadeploy2::user;
+
+
+
+my $user=libkadeploy2::user::new("root");
+print $user->get("dir");
+#$user->print();
+
+

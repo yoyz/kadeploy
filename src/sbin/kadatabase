@@ -1,0 +1,18 @@
+#!/usr/bin/perl
+
+use warnings;
+use strict;
+use libkadeploy2::kadatabase;
+
+libkadeploy2::kadatabase::get_options_cmdline();
+exit libkadeploy2::kadatabase::run();
+
+
+
+
+
+
+
+#######################################END OF MAIN#########################################
+
+

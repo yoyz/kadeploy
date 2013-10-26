@@ -1,0 +1,17 @@
+#!/usr/bin/perl
+use strict;
+use warnings;
+use libkadeploy2::kachecknodes;
+
+my $kachecknode;
+
+$kachecknode=libkadeploy2::kachecknodes::new();
+
+$kachecknode->get_options_cmdline();
+exit $kachecknode->run();
+
+
+################################################################################
+
+
+

@@ -1,0 +1,11 @@
+#!/usr/bin/perl
+use strict;
+use warnings;
+use libkadeploy2::kareset;
+
+
+libkadeploy2::kareset::get_options_cmdline();
+exit libkadeploy2::kareset::run();
+
+################################################################################
+

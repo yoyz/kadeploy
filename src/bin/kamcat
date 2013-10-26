@@ -1,0 +1,12 @@
+#!/usr/bin/perl
+
+use strict;
+use warnings;
+use libkadeploy2::kamcat;
+
+my $kamcat;
+$kamcat=libkadeploy2::kamcat::new();
+$kamcat->get_options_cmdline();
+
+exit $kamcat->run();
+

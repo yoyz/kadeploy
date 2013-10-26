@@ -1,0 +1,14 @@
+#!/usr/bin/perl
+use strict;
+use warnings;
+use libkadeploy2::karights;
+
+libkadeploy2::karights::get_options_cmdline();
+exit libkadeploy2::karights::run();
+
+
+
+
+
+################################################################################
+

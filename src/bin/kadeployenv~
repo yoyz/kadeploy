@@ -1,0 +1,7 @@
+#!/usr/bin/perl
+use strict;
+use warnings;
+use libkadeploy2::kadeployenv;
+
+libkadeploy2::kadeployenv::get_options_cmdline();
+exit libkadeploy2::kadeployenv::run();

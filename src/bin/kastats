@@ -1,0 +1,67 @@
+#!/usr/bin/perl
+
+use strict;
+use warnings;
+
+use Getopt::Long;
+use libkadeploy2::conflib;
+use libkadeploy2::deploy_iolib;
+
+
+# Globals
+my $deployment_number;
+
+
+
+# Returns all environments that match the given name
+sub get_deployment_stats($) {
+
+    my $dbh = shift;
+
+    my $sth = $dbh->prepare("SELECT max(deployment.id) as max FROM deployment");
+    $sth->execute();
+
+    while (my $ref = $sth->fetchrow_hashref()) {
+        $deployment_number = $ref->{max};
+    }
+
+    $sth->finish();
+
+    $sth = $dbh->prepare("select count(deployment.id) as 'deploynb', date_format(deployment.startdate, '%Y %m') as 'month' from deployment group by date_format(deployment.startdate, '%Y %m')");
+    $sth->execute();
+
+    my %deploy_dates;
+
+    while (my $ref = $sth->fetchrow_hashref()) {
+	$deploy_dates{$ref->{month}} = $ref->{deploynb};
+#        print $ref->{deploynb} . "\t" . $ref->{month} ."\n";
+    }
+
+    $sth->finish();
+
+    print "# Mois\t\tnbdepl\tnbtot\tnbmoy\n";
+
+    $sth = $dbh->prepare("select count(*) as 'nbtot', date_format(deployment.startdate, '%Y %m') as 'month' from deployment, deployed where deployed.deployid=deployment.id group by date_format(deployment.startdate, '%Y %m')");
+    $sth->execute();
+
+    while (my $ref = $sth->fetchrow_hashref()) {
+        print $ref->{month} . "\t\t" . $deploy_dates{$ref->{month}} . "\t" . $ref->{nbtot} . "\t" .  int(10 * $ref->{nbtot}/$deploy_dates{$ref->{month}} + 0.5)/10 . "\n";
+    }
+
+    $sth->finish();
+
+
+
+    return 1;
+}
+
+
+####
+
+my $base = libkadeploy2::deploy_iolib::connect();
+
+get_deployment_stats($base);
+
+print "\nnumber of deployments:", $deployment_number, "\n"; 
+
+libkadeploy2::deploy_iolib::disconnect($base);

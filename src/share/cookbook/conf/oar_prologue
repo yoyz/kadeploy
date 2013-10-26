@@ -1,0 +1,30 @@
+#!/bin/sh
+# $Id: oar_prologue,v 1.6 2004/08/24 16:10:34 neyron Exp $
+
+# prologue arguments
+# Script is run under uid of oar who is sudo
+# argv[1] is the jobid
+# argv[2] is the user's name
+# argv[3] is the file which contains the list of nodes used
+# argv[4] is the job script name if exists
+
+#We are in deploy mode on this node
+
+NODES=$(uniq $3)
+echo "You are in KADEPLOY mode. You can deploy your image on nodes: $NODES"
+NODE_CMD_FORMAT=""
+for i in $NODES
+do
+    NODE_CMD_FORMAT="$NODE_CMD_FORMAT -m $i"
+done
+
+sudo /home/local/deploy/kadeploy2/bin/kaadduser $NODE_CMD_FORMAT -p hda2 -p hda9 -p hda10 -p hda11 -p hda12 -p hda13 -l $2 
+
+
+#Exemple for mono processor cluster
+#DIFFUSE_SCRIPT=~oar/oar_diffuse_script
+#PROLOGUE_LOCAL=~oar/oar_prologue_local
+#CMD="$PROLOGUE_LOCAL $1 $2 $4"
+
+#$DIFFUSE_SCRIPT $3 $CMD
+

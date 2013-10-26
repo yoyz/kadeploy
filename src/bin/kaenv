@@ -1,0 +1,15 @@
+#!/usr/bin/perl
+
+use strict;
+use warnings;
+use libkadeploy2::kaenv;
+
+
+libkadeploy2::kaenv::get_options_cmdline();
+exit libkadeploy2::kaenv::run();
+
+
+
+################################################################################
+
+

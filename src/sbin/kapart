@@ -1,0 +1,15 @@
+#!/usr/bin/perl
+
+use strict;
+use warnings;
+use libkadeploy2::kapart;
+
+my $kapart;
+$kapart=libkadeploy2::kapart::new();
+$kapart->get_options_cmdline();
+if ($kapart->run()) { exit 0; } else { exit 1; }
+
+################################################################################
+
+
+

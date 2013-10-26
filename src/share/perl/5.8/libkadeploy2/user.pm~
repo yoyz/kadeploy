@@ -1,0 +1,6 @@
+package libkadeploy2::user;
+
+sub new()
+{
+    
+}

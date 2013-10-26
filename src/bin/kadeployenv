@@ -1,0 +1,9 @@
+#!/usr/bin/perl 
+use strict;
+use warnings;
+use libkadeploy2::kadeployenv;
+
+my $kadeployenv;
+$kadeployenv=libkadeploy2::kadeployenv::new();
+$kadeployenv->get_options_cmdline();
+exit $kadeployenv->run();

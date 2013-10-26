@@ -1,0 +1,164 @@
+#!/usr/bin/perl
+use Getopt::Long;
+use libkadeploy2::deployconf;
+use libkadeploy2::parallelcommand;
+use libkadeploy2::message;
+use libkadeploy2::cmdline;
+use libkadeploy2::remoteparallelcommand;
+use strict;
+use warnings;
+
+sub kaexecconf($$$$$);
+sub kaexec($$$$$$);
+sub kaexeccommand($$$$$$);
+
+my $message=libkadeploy2::message::new();
+my $conf=libkadeploy2::deployconf::new();
+if (! $conf->loadcheck()) { exit 1; }
+
+
+my @hostlist;
+my $refnodelist;
+my $nodename;
+my $nodelist;
+my $hostfile;
+my $help;
+my $cmd;
+my $command;
+my $nodecommand;
+my $cmdpath;
+my $errcode;
+my $verbose;
+my $confcommand;
+my $login;
+my $connector;
+my $timeout;
+my $scriptfile;
+my $prefixpath="/etc/kadeploy/nodes";
+
+GetOptions('m=s'               => \@hostlist,
+	   'f=s'               => \$hostfile,
+
+	   'c=s'               => \$cmd,
+	   'command=s'         => \$cmd,
+	   's=s'               => \$scriptfile,
+	   'script=s'          => \$scriptfile,
+
+	   'confcommand!'      => \$confcommand,
+	   'nodecommand!'      => \$nodecommand,
+	   'h!'                => \$help,
+	   'help!'             => \$help,
+	   'v!'                => \$verbose,
+	   'verbose!'          => \$verbose,
+	   'login=s'           => \$login,
+	   'l=s'               => \$login,
+	   'connector=s'       => \$connector,
+	   'timeout=s'         => \$timeout,
+	   't=s'               => \$timeout,
+	   );
+if ($help)        { $message->kaexec_help(); exit 0; }
+if ($hostfile)    { $nodelist=libkadeploy2::cmdline::loadhostfileifexist($hostfile);  }
+if (@hostlist)    { $nodelist=libkadeploy2::cmdline::loadhostcmdlineifexist(\@hostlist);  }
+if (! $connector) { $connector="ssh"; }
+if (! $timeout)   { $timeout=10;      }
+if (! $verbose)   { $verbose=0;       }
+
+
+if ($nodelist)
+{
+    if ($confcommand &&          #CONFCOMMAND
+	$cmd 	
+	)
+    {
+	$refnodelist=\@hostlist;
+	if (kaexecconf($login,$nodelist,$cmd,$timeout,$verbose))
+	    
+	{ 	     exit 0; 	}
+	else 	{    exit 1;
+	}
+    }
+
+    elsif ($nodecommand &&          #NODECOMMAND
+	$cmd && 
+	$login 
+	)
+    {
+	if (kaexeccommand($connector,$login,$nodelist,$cmd,$timeout,$verbose))
+	{ 	    exit 0; 	}
+	else
+	{ 	    exit 1; 	}
+    }
+}
+
+
+
+################################################################################
+
+sub kaexeccommand($$$$$$)
+{
+    my $connector=shift;    
+    my $login=shift;
+    my $nodelist=shift;
+    my $cmd=shift;
+    my $timeout=shift;
+    my $verbose=shift;
+ 
+    my $refnodelist;
+    my @node_list;
+    my $remoteparallelcommand=libkadeploy2::remoteparallelcommand::new(
+								       $connector,
+								       "internal",
+								       $login,
+								       $nodelist,
+								       $cmd,
+								       $timeout,
+								       $verbose,
+								      );
+    if ($remoteparallelcommand->exec())
+    { return 1; }
+    else
+    { return 0; }   
+}
+
+
+
+sub kaexecconf($$$$$)
+{
+    my $login=shift;
+    my $nodelist=shift;
+    my $cmd=shift;
+    my $timeout=shift;
+    my $verbose=shift;
+    my @node_list;
+    my @cmdlist;
+    my $refcmdlist;
+    my $ok=1;
+    my $pcommand;
+    my $refnodelist;
+    my $node;
+    my $nodename;
+
+    $refnodelist=$nodelist->get_nodes();
+    @node_list=@$refnodelist;
+    
+    foreach $node (@node_list)
+    {
+	$nodename=$node->get_name();
+	$cmdpath=$prefixpath."/".$nodename."/command/".$cmd;
+	if (-e $cmdpath)
+	{
+	    @cmdlist=(@cmdlist,$cmdpath);
+	}
+	else
+	{
+	    $message->commandnodenamefailed(2,$cmd,$nodename);
+	    $ok=0;
+	}
+    }
+
+    $refcmdlist=\@cmdlist;
+    $pcommand=libkadeploy2::parallelcommand::new(10,$verbose);
+    $errcode=$pcommand->execparallel($refcmdlist);
+    if ($ok==0) { $errcode=0; }
+    return $errcode;
+}

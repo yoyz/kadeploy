@@ -1,0 +1,93 @@
+#!/usr/bin/perl
+
+use strict;
+use warnings;
+use libkadeploy2::partition;
+use libkadeploy2::disk;
+use libkadeploy2::fstab;
+
+sub newpart($);
+
+my $retcode=0;
+my $disk;
+my $part;
+my $partline;
+my $fstab;
+
+$disk=libkadeploy2::disk::new();
+
+
+$disk->set_interface("ide");
+$disk->set_size("20000");
+
+
+if (1)
+{
+    $partline="part=1 size=700 label=/usr mkfs=no ostype=Linux fs=ext2 fdisktype=83 type=primary";
+    newpart($partline);
+}
+
+if (1)
+{
+    $partline="part=2 type=primary size=300 label=/opt mkfs=yes ostype=LinUx fs=ext3 fdisktype=83";
+    newpart($partline);
+}
+
+if (1)
+{
+    $partline="part=3 type=primary size=500 label=/tmp mkfs=yes ostype=Linux fs=ext2 fdisktype=83";
+    newpart($partline);
+}
+
+if (1)
+{
+    $partline="part=4 type=primary size=400 label=swap mkfs=yes ostype=Linux fs=swap fdisktype=82";
+    newpart($partline);
+}
+
+
+if (1)
+{
+#    $disk->get_fromdb("cls1.mycluster.net",1);
+    $disk->set_interface("ide");
+    $fstab=libkadeploy2::fstab::new();
+
+   $fstab->set_disk($disk);
+    $fstab->set_disknumber(1);
+    $fstab->set_partnumber(2);
+    $fstab->check();
+    print $fstab->get("linux");
+#    $disk->print();
+#    print $disk->get_frompartition(1,"size");
+#    print $disk->get_frompartition(1,"type");
+#    print $disk->get_frompartition(1,"label");
+}
+
+#for ( my $i=1 ; $i< $disk->get_numberofpartition(); $i++)
+#{  print "$i:".$disk->get_frompartition($i,"label")."\n"; }
+
+if (0)
+{
+    $part=libkadeploy2::partition::new();
+    if (! $part->addtodb("cls1.mycluster.net",1)) { print "NO!!!"; $retcode=1;}
+    $part->print();
+}
+
+
+
+#$part=libkadeploy2::partition::new();
+#$part->getfromdb("cls1.mycluster.net",1,1);
+#$part->print();
+
+
+
+exit $retcode;
+
+sub newpart($)
+{
+    my $partline=shift;
+    $part=libkadeploy2::partition::new();
+    $part->load_line($partline);
+    $disk->add_partition($part);
+#    if (! $part->addtodb("cls1.mycluster.net",1)) { print "NO!!!"; $retcode=1;}
+}

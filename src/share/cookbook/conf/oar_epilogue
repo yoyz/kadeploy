@@ -1,0 +1,44 @@
+#!/bin/sh
+# $Id: oar_epilogue,v 1.7 2004/08/24 16:10:34 neyron Exp $
+
+# prologue arguments
+# Script is run under uid of oar who is sudo
+# argv[1] is the jobid
+# argv[2] is the user's name
+# argv[3] is the file which contains the list of nodes used
+# argv[4] is the job script name if exists
+
+#We are in deploy mode on this node
+
+NODES=$(uniq $3)
+REF_PARTITION=hda8
+NODE_CMD_FORMAT=""
+NODE_IPS=""
+
+for i in $NODES
+do
+    NODE_CMD_FORMAT="$NODE_CMD_FORMAT -m $i"
+    NODE_IP=$(host $i | sed "s/.*address\ //")
+    ps -fU deploy | grep rsh | grep $NODE_IP | awk '{print $2}' | xargs -ifoo sudo -u deploy kill -9 foo 	
+done
+
+for i in $NODES
+do
+    oarnodesetting -s Absent -n -h $i 
+    /usr/local/bin/kareboot -s -p $REF_PARTITION -m $i > /dev/null    
+    sudo /home/local/deploy/kadeploy2/bin/kadeluser -l $2 -m $i
+done
+
+
+
+#nohup sudo -u $2 /home/local/deploy/kadeploy2/bin/kareboot -h $NODE_CMD_FORMAT -p $REF_PARTITION > /dev/null
+
+#sudo /home/local/deploy/kadeploy2/bin/kadeluser $NODE_CMD_FORMAT -l $2
+
+#Exemple for mono processor cluster
+#DIFFUSE_SCRIPT=~oar/oar_diffuse_script
+#EPILOGUE_LOCAL=~oar/oar_epilogue_local
+#CMD="$EPILOGUE_LOCAL $1 $2 $4"
+
+#$DIFFUSE_SCRIPT $3 $CMD
+
