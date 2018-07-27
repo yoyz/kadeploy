@@ -1,0 +1,17 @@
+Here is a script designed to generate a deployment kernel for kadeploy 2.1.7 (only !).
+
+The generation can be performed in two steps:
+- Deboostrap build
+- Kernel/initrd build
+
+1/ Deboostrap build
+This step can be performed by launching make_debootstrap.sh as root. It will produce a debootstrap directory.
+
+2/ Kernel build
+This step can be performed by launching make_kernel.sh as root. It will ask you some question like the kernel version you want, the initrd size (150000 seems to be a good value) and the path to a working kernel config file.
+ A built-* directory will be produced and will contain both deploy-vmlinuz and deploy-initrd files.
+
+3/ Notes
+Don't forget to edit the label_deploy line of the deploy.conf file in order to adjust the ramdisk_size. For instance: label_deploy = deploy-vmlinux*:deploy-initrd* ETH_DRV=tg3 ETH_DEV=eth0 DISK_DRV=mptsas console=tty1 console=ttyS1,57600 ramdisk_size=120000 init=/linuxrc rw
+
+The deployment environment produced is based on SSH, so don't forger to add the private key (ssh/id_deploy) in the ~deploy/.directory.

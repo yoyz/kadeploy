@@ -1,0 +1,109 @@
+.TH "kavlan" "1" "1.0" "jeremie TISSERAND" "Network command"
+.SH "NAME"
+kavlan - Manipulation of vlan
+.SH "SYNOPSIS"
+kavlan [OPTIONS]
+.br
+	[ [--add|--delete|--list]  <vlanName>]
+.br
+	[ [--tag|--untag|--remove] <port/machine> <vlanName>]
+.br
+	[--switch <name>]
+.br
+
+Only most usefull options are defined. You can see \fBOPTIONS\fR section to see the list of all the options and how to use them.
+.SH "DESCRIPTION"
+kavlan is a network command which allow user to modify the network configuration in order to create, delete or remove vlan. The user can also modify the ports and affect them to some vlan created. 
+.SH "OPTIONS"
+Options are divided in three main parts : VLAN modification, Port modification and Global options. Some options can be mixted and some others have to be used with other options. 
+
+.TP
+VLAN MODIFICATION
+\fIThese options can be used with the global option -s in order to affect only a specific switch\fR
+
+-a | --add <vlanName> Add a vlan
+.br
+-d | --del <vlanName> Delete a vlan
+.br
+-l | --list [vlanName] List vlan that matches this name
+.br
+-i | --information <vlanName> Get the port connected to the vlan
+
+.TP 
+PORT CONFIGURATION 
+\fBUse "DEFAULT" as <vlanName> to use the default vlan\fR
+.br
+\fBThe port argument can be a computer name and in this case you have not to specify the switch because it is known by kavlan\fR
+.br
+\fIThese options can to be used with the global option -s to say wich switch we want to enroll in the modification. If you don't define the -s option, the first switch of the configuration file will be choosen\fR
+
+-p | --port <port> Get the the vlan of the port
+.br
+-t | --tag <port> <vlanName> Put a machine in a vlan as Tagged 
+.br
+-u | --untag <port> <vlanName> Put a machine in a vlan as Untagged
+.br
+-r | --remove <port> <vlanName> Remove a machine of a vlan
+.br
+-z | --zero <port> Set initial configuration of a port
+
+.TP
+GLOBAL OPTIONS
+-s | --switch <switchName> Do modification on this switch
+.br
+-c | --cleaner Use a cleaner mode to modify vlan on appliance, some hp switch need this flag to modify port configuration
+.br
+-F | --config <configFile> Specify the configuration file
+.br
+-P | --path <path> Where to find the corresponding table of the site
+.br
+-h | --help Ask for help
+.br
+-v | --verbose Active verbose mode;
+
+
+.SH "FILES"
+
+\fIThis part is for administrator only.\fR
+
+There are two different kind of configuration file. A global configuration file of kavlan named kavlan.conf and another containing the global affectation of port on the switches.
+
+.TP
+GLOBAL CONFIGURATION FILE
+
+The global configuration file can be modified to specify some informations about the site and the network appliances global informations. 
+.br
+In this file you can specify many switch information and only one routeur and site informations.
+.br
+See the configuration file named "kavlanExample.conf" given in the package to see how to specify information.
+
+.TP
+CORESPONDING TABLE CONFIGURATION FILE
+
+You can specify a name to each port of each switch.
+.br
+See the configuration file named "siteExample.conf". 
+
+.SH "EXAMPLES"
+
+To add a vlan with a specific configuration file :
+.br
+\fB	$kavlan -F kavlan.conf -a essai\fR
+.br
+To show information of the vlan essai on the switch XX
+.br
+\fB	$kavlan -i essai -s XX\fR
+.br
+Add a computer as tag for vlan "essai" with a specific path for the coresponding table
+.br
+\fB	$kavlan -P ./ -t computer5 essai\fR
+.br
+Add a port as untag for default vlan
+.br
+\fB	$kavlan -u 10 DEFAULT -s XX \fR
+
+.SH "BUGS"
+.SH "AUTHOR"
+jeremie TISSERAND
+.SH "SEE ALSO"
+

@@ -1,0 +1,250 @@
+#!/usr/bin/perl
+
+# karecordenv registers (but does not create) 
+# an existing environment archive
+
+use Getopt::Long;
+use libkadeploy2::deploy_iolib;
+use libkadeploy2::conflib;
+use libkadeploy2::envlib;
+use libkadeploy2::node_bd;
+use libkadeploy2::nodes;
+use libkadeploy2::hexlib;
+use strict;
+use warnings;
+
+sub help();
+
+#declares option variables and sets default values
+my $name;
+my $version=1;
+my $description="none";
+my $author="@";
+my $filebase_url;
+my $filebase_path;
+my $filesite_url;
+my $filesite_path;
+my $size=0;
+my $initrd_path;
+my $kernel_path;
+my $kernel_param;
+my $fdisk_type;
+my $file_system="ext2";
+my $file_environment;
+my $optsupport=0;
+my $help;
+my $successful = 0;
+my $username;
+my $user;
+
+## Configuration
+my $configuration = libkadeploy2::conflib->new();
+my $clustername; # name of the targetted cluster for the environment
+
+if ($ENV{SUDO_USER})
+{  $username=$ENV{SUDO_USER}; }
+else                     
+{ $username=$ENV{USER}; }
+
+if (!@ARGV){
+    help();
+    exit 0;
+}
+
+# gets the options
+GetOptions('z=s'                => \$clustername,
+           'cluster=s'          => \$clustername,
+           'n=s'                => \$name,
+	   'name=s'             => \$name,
+           'v=i'                => \$version,
+	   'version=i'          => \$version,
+           'd=s'                => \$description,
+	   'description=s'      => \$description,
+           'a=s'                => \$author,
+	   'author=s'           => \$author,
+           's=i'                => \$size,
+	   'size=i'             => \$size,
+	   'i=s'                => \$initrd_path,
+	   'initrdpath=s'       => \$initrd_path,
+           'k=s'                => \$kernel_path,
+	   'kernelpath=s'       => \$kernel_path,
+           'p=s'                => \$kernel_param,
+	   'kernelparam=s'      => \$kernel_param,
+           'fb=s'               => \$filebase_url,
+	   'filebase=s'         => \$filebase_url,
+           'ft=s'               => \$filesite_url,
+	   'filesite=s'         => \$filesite_url,
+           'fd=s'               => \$fdisk_type,
+	   'fdisktype=s'        => \$fdisk_type,
+           'fs=s'               => \$file_system,
+	   'filesystem=s'       => \$file_system,
+	   'fe=s'               => \$file_environment,
+	   'file_environment=s' => \$file_environment,
+	   'optsupport=s'       => \$optsupport,
+	   'o=s'                => \$optsupport,	
+	   'h!'                 => \$help,
+	   );
+
+$user=$username;
+
+if (!$clustername eq "") {
+        $configuration->set_clustername($clustername);
+        print "using settings for cluster " . $clustername . "\n";
+} else {
+        print "using settings for default cluster\n";
+}
+# load configuration files this part is overwritten by any specified nodelist
+if (!$configuration->check_conf()) {
+        print "ERROR : problem occured loading configuration file\n";
+        exit 1;
+}
+# register configuration
+libkadeploy2::deploy_iolib::register_conf($configuration);
+libkadeploy2::node_bd::register_conf($configuration);
+libkadeploy2::nodes::register_conf($configuration);
+
+if ($help)
+{
+    help();
+    exit(0);
+}
+## open file environment description
+if ($file_environment) {
+    libkadeploy2::envlib::init_env ($file_environment);
+      if (!$name) {$name = libkadeploy2::envlib::get_env("name") if libkadeploy2::envlib::get_env("name");}
+      $version = libkadeploy2::envlib::get_env("version") if libkadeploy2::envlib::get_env("version");
+      $description = libkadeploy2::envlib::get_env("description") if libkadeploy2::envlib::get_env("description");
+      $author= libkadeploy2::envlib::get_env("author") if libkadeploy2::envlib::get_env("author");
+      $size= libkadeploy2::envlib::get_env("size") if libkadeploy2::envlib::get_env("size");
+      $initrd_path= libkadeploy2::envlib::get_env("initrdpath") if libkadeploy2::envlib::get_env("initrdpath");
+      $kernel_path= libkadeploy2::envlib::get_env("kernelpath") if libkadeploy2::envlib::get_env("kernelpath");
+      $kernel_param= libkadeploy2::envlib::get_env("kernelparam") if libkadeploy2::envlib::get_env("kernelparam");
+      $filebase_url= libkadeploy2::envlib::get_env("filebase") if libkadeploy2::envlib::get_env("filebase");
+      $filesite_url= libkadeploy2::envlib::get_env("filesite") if libkadeploy2::envlib::get_env("filesite");
+      $fdisk_type= libkadeploy2::envlib::get_env("fdisktype") if libkadeploy2::envlib::get_env("fdisktype");
+      $file_system= libkadeploy2::envlib::get_env("filesystem") if libkadeploy2::envlib::get_env("filesystem");
+      $optsupport= libkadeploy2::envlib::get_env("optsupport") if libkadeploy2::envlib::get_env("optsupport");
+##	libkadeploy2::envlib::dump_env ();
+}	
+## performs checks
+if(!$username)
+{
+    print "ERROR : can't get user\n";
+    exit 1;
+}
+
+
+if(!$name){
+    print "ERROR : you must defined a name for the environment to be registred\n";
+    exit 0;
+}
+if(!$kernel_path){
+    print "ERROR : kernel path must be defined\n";
+    exit 0;
+}
+if(!$filebase_url){
+    print "ERROR : path to environment image must be defined\n";
+    exit 0;
+}
+if(!$filesite_url){
+    print "WARNING : path to specialisation file \"may\" be defined\n";
+    $filesite_url=libkadeploy2::conflib::get_conf("post_install_archive");
+}
+if($version < 1){
+    print "ERROR : version number must be >= 1";
+    exit 0;
+}
+
+if (!$fdisk_type)
+{
+    print "Warning : using linux partition type : 83\n";
+    $fdisk_type=131;    
+}
+else
+{
+    $fdisk_type=libkadeploy2::hexlib::unhexalize($fdisk_type);
+}
+
+
+
+# ajouter des vérifs sur l'existence des fichiers filebase et filesite?
+
+## modification for database registration
+# je serais tenté de faire des modifs sur filebase et filesite pour ajouter file:/ au début du path 
+# par exemple mais comment gérer ensuite le cas des url:/ 
+# par la suite... 
+
+if ($filebase_url =~ /^\/.+$/)
+{
+    $filebase_path="file:/".$filebase_url;
+}
+else
+{
+    $filebase_path=$filebase_url;
+}
+
+if ($filesite_url)
+{
+    if ($filesite_url =~ /^\/.+$/)
+    {
+	$filesite_path.="file:/".$filesite_url;
+    }
+    else
+    {
+	$filesite_path=$filesite_url;
+    }
+}
+
+
+## registers the environment
+my $base = libkadeploy2::deploy_iolib::connect();
+
+$successful =  libkadeploy2::deploy_iolib::add_environment($base,
+							   $name,
+							   $version,
+							   $description,
+							   $author,
+							   $filebase_path,
+							   $filesite_path,
+							   $size,
+							   $initrd_path,
+							   $kernel_path,
+							   $kernel_param,
+							   $fdisk_type,
+							   $file_system,
+							   "1",
+							   $optsupport,
+							   $user
+							   );
+
+libkadeploy2::deploy_iolib::disconnect($base);
+
+if ($successful){
+    print "Environment registration successfully completed.\n";
+}else{
+    print "ERROR : environment registration failed\n";
+}
+
+1;
+
+sub help() {
+    print "
+Usage : karecordenv\n
+\t-c  | --cluster          clustername          (default is defaut cluster)
+\t-n  | --name             environmentname
+\t-v  | --version          version              (default is 1)
+\t-d  | --description      description
+\t-a  | --author           author email
+\t-fb | --filebase         environment image path
+\t-ft | --filesite         post-installation file path
+\t-s  | --size             size (Mo)
+\t-i  | --initrdpath       inirdpath
+\t-k  | --kernelpath       kernel path
+\t-p  | --param            kernel param
+\t-fd | --fdisktype        fdisk type           (default is 83)
+\t-fs | --filesystem       file system          (default is ext2)
+\t-o  | --optsupport       optimisation support (default is 0)
+\t-fe | --file_environment
+\t-h                       get this help message\n
+Name, kernel path, environment image path and post-installation file path must be defined\n";
+}

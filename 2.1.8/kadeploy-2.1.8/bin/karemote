@@ -1,0 +1,148 @@
+#!/usr/bin/perl
+
+# needs a configuration file that should be found at /etc/kadeploy/deploy_cmd.conf
+
+use File::Copy;
+use Getopt::Long;
+use libkadeploy2::conflib;
+use libkadeploy2::bootlib;
+use libkadeploy2::deploy_iolib;
+use libkadeploy2::rights_iolib;
+use libkadeploy2::node_bd;
+use libkadeploy2::nodes;
+use libkadeploy2::confroot;
+use strict;
+
+Getopt::Long::Configure ("gnu_getopt");
+
+my $conf_root_dir = "";
+my @host_list = ();
+my $host;
+my $verbose = 0;
+my $remote_command = "";
+my $node_file;
+my $username = getpwuid($ENV{SUDO_UID}); # real user
+my $kareboot_usage = "Usage : karemote [-m|--machine hostname] \
+-f nodefile  [-c|--command] \"remote command\"\
+[-C|--configuration <configuration root directory>]\n";
+
+if (!@ARGV) {
+  print $kareboot_usage;
+  exit 0;
+}
+
+#-------------
+# Get options
+#-------------
+GetOptions('m=s'        => \@host_list,
+  'machine=s'           => \@host_list,
+  'f=s'                 => \$node_file,
+  'c=s'                 => \$remote_command,
+  'command=s'           => \$remote_command,
+  'verbose'             => \$verbose,
+  'v'                   => \$verbose,
+  'C=s'                 => \$conf_root_dir,
+  'configuration=s'     => \$conf_root_dir
+);
+
+# Get configuration root directory
+if (!$conf_root_dir eq "") {
+  libkadeploy2::confroot::set_conf_rootdir($conf_root_dir);
+}
+libkadeploy2::confroot::get_conf_rootdir();
+libkadeploy2::confroot::info();
+
+# Configuration
+my $configuration = libkadeploy2::conflib->new();
+
+if ($node_file)
+{
+    my $line;
+    open(NODEFILE,$node_file) or die "Can't open node_file : $node_file\n";
+    while ($line = <NODEFILE>)
+    {
+        if ($line =~ /([a-zA-Z0-9\.-]+)/) { $line = $1; }
+        chomp($line);
+        push(@host_list, $line);
+    }
+    close(NODEFILE);
+}
+
+
+
+## checks if needed options are defined
+if (!scalar(@host_list)){
+    print $kareboot_usage;
+    exit 0;
+}
+if ($remote_command eq "") {
+    print "WARNING: no command specified running simple test\n";
+    $remote_command = "true";
+}
+
+
+# load configuration files
+if (!$configuration->check_nodes_conf(\@host_list) || !$configuration->check_conf()) {
+    print "ERROR : problem occured loading configuration file\n";
+    exit 1;
+}
+# register configuration for the different modules
+libkadeploy2::deploy_iolib::register_conf($configuration);
+libkadeploy2::node_bd::register_conf($configuration);
+libkadeploy2::nodes::register_conf($configuration);
+libkadeploy2::bootlib::register_conf($configuration);
+
+
+my $deployuser = $configuration->get_conf("deploy_user");
+my $base = libkadeploy2::deploy_iolib::connect();
+
+my $right_string;
+my @right_array;
+
+my %executedCommands;
+
+# create node set
+my $nodes_set = libkadeploy2::nodes->new("production", $verbose);
+my $tmp_node;
+my $nodeIP;
+
+my $connector = $configuration->get_conf("prod_rcmd");
+
+foreach $host (@host_list) {
+    $tmp_node = libkadeploy2::node_bd->new($host, 0, 0, 0, 0);
+    if ($tmp_node) {
+        $nodeIP = $tmp_node->get_IP;
+ 	my $filter = "";
+        @right_array = ();
+        $right_string = libkadeploy2::rights_iolib::get_node_rights($base, $username, $host);
+	if ($right_string ne "") { # there is a command to issue
+	    $nodes_set->add($tmp_node);
+	    if ($right_string eq "*") {
+                $filter = $remote_command;
+	    } else {
+	        @right_array = split(/ /, $right_string);
+	        $filter = "ROOTPART=\\\$(mount | grep \\\"on / \\\" | sed \\\"s/ on.*//\\\"| sed \\\"s/\\\/dev\\\///\\\"); if [[ ";
+                my $is_first = 1;
+		foreach my $item (@right_array) {
+	            if ($is_first) {
+			    $is_first = 0; 
+		    } else {
+			    $filter .= " && ";
+	            }
+	            $filter .= "\\\$ROOTPART != ". "\\\"" . $item ."\\\"";
+		}
+		$filter .= " ]] ; then exit 2; fi; " . $remote_command;
+	    }
+	    print $filter . "\n" if ($verbose);
+            $executedCommands{$nodeIP} = $connector . " " . $nodeIP . " ". " \" " . $filter ." \"";
+	}
+    } else {
+        print "node $host not included in current execution\n";
+    }
+}
+
+$nodes_set->runThose(\%executedCommands, 10, 50, "", 0);
+if ($nodes_set->getThoseCommandSummary()) {
+	exit(0);
+}
+exit (1);

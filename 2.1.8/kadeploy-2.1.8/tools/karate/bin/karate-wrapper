@@ -1,0 +1,10 @@
+#!/bin/sh -e
+
+SRC="$HOME/work/kadeploy-svn/trunk/tools/karate"
+export RUBYLIB="$SRC/lib:$SRC:$SRC/lib/cmdctrl:$RUBYLIB"
+IFS=":"
+for dir in $RUBYLIB; do
+    if [ -e "$dir/bin/karate" ]; then
+        exec "$dir/bin/karate" $*
+    fi
+done

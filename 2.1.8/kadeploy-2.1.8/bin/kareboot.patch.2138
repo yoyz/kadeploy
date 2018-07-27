@@ -1,0 +1,20 @@
+--- /usr/local/kadeploy-2.1.8/bin/kareboot	2009-06-03 18:38:59.000000000 +0200
++++ ./kareboot	2009-06-03 18:24:19.000000000 +0200
+@@ -74,7 +74,7 @@
+   'noreboot'            => \$noreboot,
+   'p=s'                 => \$device,
+   'partition=s'         => \$device,
+-  'kp=s'	              => \$kernel_parameters,
++  'kp=s'	        => \$kernel_parameters,
+   'kernel-parameters=s' => \$kernel_parameters,
+   'verbose'             => \$verbose,
+   'v'                   => \$verbose,
+@@ -99,7 +99,7 @@
+     open(NODEFILE,$node_file) or die "Can't open node_file : $node_file\n";
+     while ($line = <NODEFILE>)
+     {
+-        if ($line =~ /([a-zA-Z0-9\.]+)/) { $line = $1; }
++        if ($line =~ /([a-zA-Z0-9-\.]+)/) { $line = $1; }
+         chomp($line);
+         push(@host_list, $line);
+     }

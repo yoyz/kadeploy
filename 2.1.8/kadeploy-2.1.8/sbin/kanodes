@@ -1,0 +1,323 @@
+#!/usr/bin/perl
+
+# TODO add a function that checks file syntax
+
+use Getopt::Long;
+use libkadeploy2::deploy_iolib;
+use libkadeploy2::conflib;
+use libkadeploy2::confroot;
+ 
+use strict;
+use warnings;
+
+#-----------
+# Functions
+#-----------
+sub loadnodesfile($);
+sub loadpartitionfile($);
+sub updatedeployedtable();
+sub usage();
+sub listnodes();
+sub delpartitiontable();
+sub listpartition();
+
+#------------------
+# Global variables
+#------------------
+my $add;
+my @nodestodel;
+my $help;
+my $listnode;
+my $listpartition;
+my $iwanthelp=1;
+my $clustername;
+my $conf_root_dir;
+
+#---------------
+# Parse options
+#---------------
+GetOptions('z=s'            => \$clustername,
+	   'cluster=s'      => \$clustername,
+	   'add!'           => \$add,
+	   'del=s'          => \@nodestodel,
+	   'h!'             => \$help,
+	   'listnode!'      => \$listnode,
+	   'listpartition!' => \$listpartition,
+           'C=s'            => \$conf_root_dir,
+           'configuration=s' => \$conf_root_dir);
+
+my $disk_id;
+my @host_id_list = ();
+my @part_env_id_list = ();
+my $ok=1;
+
+if ($help) { usage(); $iwanthelp=0; }
+
+#-------------------------------------------
+# Set Kadeploy configuration root directory
+#-------------------------------------------
+if (!$conf_root_dir eq "") {
+  libkadeploy2::confroot::set_conf_rootdir($conf_root_dir);
+}
+my $kadeploy_config_dir = libkadeploy2::confroot::get_conf_rootdir();
+libkadeploy2::confroot::info();
+
+# Configuration
+my $configuration = libkadeploy2::conflib->new();
+my $nodesfile=$kadeploy_config_dir."/"."clusternodes.conf";
+my $nodespartitionfile=$kadeploy_config_dir."/"."clusterpartition.conf";
+
+
+if (!$clustername eq "") {
+        $configuration->set_clustername($clustername);
+        print "using settings for cluster " . $clustername . "\n";
+} else {
+        print "using settings for default cluster\n";
+}
+# load configuration files this part is overwritten by any specified nodelist
+if (!$configuration->check_conf()) {
+        print "ERROR : problem occured loading configuration file\n";
+        exit 1;
+}
+# register configuration
+libkadeploy2::deploy_iolib::register_conf($configuration);
+
+
+if ($add)
+{
+    $iwanthelp=0;
+    print "\n";
+    print "Deleting partition table\n";
+    delpartitiontable();
+    print "Checking $nodesfile\n";
+    if (!loadnodesfile($nodesfile)) { print "Error loading $nodesfile\n"; $ok=0; }
+    print "\n";
+    
+    print "Checking $nodespartitionfile\n";
+    if (!loadpartitionfile($nodespartitionfile)) { print "Error loading $nodespartitionfile\n"; $ok=0; }
+    print "\n";
+    
+    if ($ok)
+    {
+	updatedeployedtable(); 
+#    print "Now you have to kasetup -buildpreinstall\n";
+	exit 0;
+    }
+    else
+    {
+	print "Check your configuration files...\n";
+	exit 1;
+    }
+}
+
+if (@nodestodel)
+{
+    $iwanthelp=0;
+    my $base = libkadeploy2::deploy_iolib::connect();
+
+    foreach my $host (@nodestodel)
+    {
+	print  "deleting $host\n";
+	libkadeploy2::deploy_iolib::del_node($base,$host);
+    }
+
+    libkadeploy2::deploy_iolib::disconnect($base);
+}
+
+if ($listnode)
+{
+    $iwanthelp=0;
+    listnodes();
+}
+
+if ($listpartition)
+{
+    $iwanthelp=0;
+    listpartition();
+}
+
+if ($iwanthelp)
+{
+    usage();
+}
+
+################################################################################
+
+sub usage()
+{
+    print "$0
+\t--cluster                                      Cluster name to which nodes should be added (by default added to default cluster)
+\t-add                                           Add nodes from $nodesfile $nodespartitionfile
+\t-del [myhostname]                              Delete specified hostname
+\t-listnode                                      List node from DB
+\t-listpartition                                 list partition from DB
+\t[-C | --configuration <conf root directory>]   Configuration root directory
+\t-h                    this help
+
+-c option is IMPORTANT in the case of multicluster, to register the nodes to cluster specific databases. If there is only one database for all the site's clusters the default configuration is based on /etc/kadeploy/deploy.conf configuration file. Please refer to man page for additional information.
+";
+}
+
+
+sub delpartitiontable()
+{
+    my $base = libkadeploy2::deploy_iolib::connect();
+    libkadeploy2::deploy_iolib::del_partition_table($base);
+    libkadeploy2::deploy_iolib::disconnect($base);
+}
+
+sub listpartition()
+{
+    my @partitionlist;
+    my $partsize;
+    my $partnumber=1;
+    my $base = libkadeploy2::deploy_iolib::connect();
+    @partitionlist=libkadeploy2::deploy_iolib::list_partition($base);
+    print STDERR "partition list\n";
+    print STDERR "--------------\n";
+
+    foreach $partsize (@partitionlist)
+    {
+	print "$partnumber\t$partsize Mb\n"; 
+	$partnumber++;
+    }
+    print "\n";
+    libkadeploy2::deploy_iolib::disconnect($base);
+}
+
+sub listnodes()
+{
+    my @nodelist;
+    my $node;
+    my $base = libkadeploy2::deploy_iolib::connect();
+    @nodelist=libkadeploy2::deploy_iolib::list_node($base);
+    print STDERR "node list\n";
+    print STDERR "---------\n";
+    foreach $node (@nodelist)
+    {
+	print "$node\n";
+    }
+    libkadeploy2::deploy_iolib::disconnect($base);					  
+}
+
+sub loadnodesfile($)
+{
+    my $file = shift;
+    my $ok=0;
+    open(DESC,$file);    
+    my $base = libkadeploy2::deploy_iolib::connect();
+    foreach my $line (<DESC>)
+    {
+	# checks if it is a commentary
+	chomp($line);
+	if($line)
+	{
+	    #check line 
+	    #node1 11:22:33:44:55:66 192.168.0.1
+	    if($line =~ /^([a-z0-9\-\.]+)[\t\s]+(..:..:..:..:..:..)[\t\s]+([0-9]+\.[0-9]+\.[0-9]+\.[0-9]+)[\t\s]*$/)
+	       {
+		   # nodes description
+		   my ($name,$ether,$ip)=($1,$2,$3);
+		   my @info = ($name,$ether,$ip);
+		   my $node_id = libkadeploy2::deploy_iolib::add_node($base,\@info);
+		   push(@host_id_list, $node_id);
+		   print "Registring $name\n";
+		   $ok=1;
+	       }	       
+	}	    
+    }   
+
+    close(DESC);
+    libkadeploy2::deploy_iolib::disconnect($base);    
+   if ($ok)
+    {
+	print "Nodes Registration completed.\n";    
+    }
+    else
+    {
+	print "Nodes Registration failed.\n";    
+    }
+    return $ok;
+
+}
+
+sub loadpartitionfile($)
+		      {
+    my $file = shift;
+    open(DESC,$file);
+    my $base = libkadeploy2::deploy_iolib::connect();
+    my $ok=0;
+    my @listid=();
+    foreach my $line (<DESC>)
+    {
+	# checks if it is a commentary
+	chomp($line);
+	if($line)
+	{
+	    #check line
+	    #block_device=hda size=8000
+            #block_device=cciss/c0d0 size=8000
+	    if ($line =~ /^block_device=([a-zA-Z0-9\/]+)[\t\s]+size=([0-9]+)[\t\s]*$/)
+	    {		
+		# disk description
+		my ($harddisk,$sizeMB);
+		($harddisk,$sizeMB)=($1,$2);
+		my @info = ($harddisk,$sizeMB);
+		$disk_id = libkadeploy2::deploy_iolib::add_disk($base,\@info);
+		print "Registring harddisk $harddisk\n";
+	    }
+	    #check line
+	    #hda part=1 size=500  fdisktype=82 label=swap type=logical
+	    #hda part=p1 size=500  fdisktype=82 label=swap type=logical
+	    if ($line =~ /^part=([a-zA-Z0-9]+)[\t\s]+size=([0-9]+)[\t\s]+fdisktype=[0-9a-zA-Z]+[\t\s]+label=([a-zA-Z]+)[\t\s]+type=[a-zA-Z]+[\t\s]*$/)
+	    {
+		my ($id,$sizeMB,$label);		
+		($id,$sizeMB,$label)=($1,$2,$3);
+		foreach my $tmpid (@listid)
+		{
+		    if ($tmpid==$id) { print STDERR "ERROR part=$id already defined\n"; exit 1; }
+		}
+		@listid=(@listid,$id);
+		$ok=1;
+		# partition description		
+		my @info = ($id,$sizeMB,$label);
+		my $part_id = libkadeploy2::deploy_iolib::add_partition($base,\@info,$disk_id);
+		my $env_id = libkadeploy2::deploy_iolib::env_name_to_last_ver_id($base,$info[2]);
+		if(!$env_id)
+		{
+		    my $part_nb = libkadeploy2::deploy_iolib::part_id_to_nb($base,$part_id);
+		    print "WARNING : special 'undefined' environment will be affected to partition number $part_nb\n";
+		    $env_id = libkadeploy2::deploy_iolib::env_undefined_to_id($base);
+		}
+		push(@part_env_id_list, [$part_id,$env_id]);
+		print "Registring part$id $label\n";
+	    }
+	}
+    }    
+    close(DESC);    
+    libkadeploy2::deploy_iolib::disconnect($base);    
+    if ($ok)
+    {
+	print "Register partition done.\n";    
+    }
+    else
+    {
+	print "Register partition failed.\n";    
+    }
+    return $ok;
+}
+
+
+sub updatedeployedtable()
+{
+    my $base = libkadeploy2::deploy_iolib::connect();
+    foreach my $host (@host_id_list)
+    {
+	foreach my $part_env (@part_env_id_list)
+	{
+	    libkadeploy2::deploy_iolib::add_deploy($base,\$part_env,$disk_id,$host);
+	  }
+    }
+    
+    libkadeploy2::deploy_iolib::disconnect($base);    
+}

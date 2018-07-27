@@ -1,0 +1,194 @@
+#!/usr/bin/perl
+
+use Getopt::Long;
+use libkadeploy2::deploy_iolib;
+use libkadeploy2::rights_iolib;
+use libkadeploy2::conflib;
+use libkadeploy2::confroot;
+ 
+use strict;
+
+sub check_nodes($$);
+sub check_dev($$);
+sub check_partition($$$);
+
+my $conf_root_dir;
+
+if (!@ARGV) {
+  print "Usage : kaadduser [-l|--login login]
+[-m|--machine hostname]
+[-p|--partition partition]
+[-C|--configuration <configuration root directory>]\n";
+  exit 0;
+}
+
+## declares the options
+my @user_list = ();
+my @host_list = ();
+my @part_list = ();
+
+my @checked_hosts = ();
+
+## gets the options
+GetOptions('l=s'    => \@user_list,
+  'login=s'         => \@user_list,
+  'm=s'             => \@host_list,
+  'machine=s'       => \@host_list,
+  'p=s'             => \@part_list,
+  'partition=s'     => \@part_list,
+  'C=s'             => \$conf_root_dir,
+  'configuration=s' => \$conf_root_dir
+);
+
+if (!$conf_root_dir eq "") {
+  libkadeploy2::confroot::set_conf_rootdir($conf_root_dir);
+}
+libkadeploy2::confroot::get_conf_rootdir();
+libkadeploy2::confroot::info();
+
+## sets default values if needed
+if (!@user_list) {
+    print STDERR "ERROR : no user specified\n";
+    exit 1;
+}
+if (!@host_list){
+    print STDERR "ERROR : no host specified\n";
+    exit 1;
+}
+
+## Configuration
+my $configuration = libkadeploy2::conflib->new(); 
+
+# load configuration files
+if (!$configuration->check_nodes_conf(\@host_list) || !$configuration->check_conf()) {
+    print STDERR "ERROR : problem occured loading configuration file\n";
+    exit 1;
+}
+# register configuration
+libkadeploy2::deploy_iolib::register_conf($configuration);
+
+
+my $base = libkadeploy2::deploy_iolib::connect();
+
+## checks if specified nodes are registered
+@checked_hosts = check_nodes($base,\@host_list);
+if(!scalar(@checked_hosts)){ 
+    print STDERR "ERROR : none of the specified nodes is registered\n";
+    libkadeploy2::deploy_iolib::disconnect($base);
+    exit 1;
+}
+
+
+if (!@part_list){
+    print "WARNING : no partition specified ; rights granted for all partitions\n";
+    @part_list = ("*");
+}else{
+    foreach my $device (@part_list){
+	my $dev; my $part;
+	if($device eq "*"){
+    	    $dev = "*";
+    	    $part = "0";
+    	}else{
+    	    ## separates device and partition number from $device
+    	    $dev = substr($device, 0, 3);
+    	    my @nb = split(/$dev/, $device);
+    	    $part = $nb[1];
+    	    if(!$part){
+    		$part = "0";
+		if(!check_dev($base,$dev)){
+		    print "ERROR : target device $device does not exist\n";
+		    libkadeploy2::deploy_iolib::disconnect($base);
+		    exit 0;
+		}
+    	    }else{
+		if(!check_partition($base,$dev,$part)){
+		    print "ERROR : target partition $device does not exist\n";
+		    libkadeploy2::deploy_iolib::disconnect($base);
+		    exit 0;
+		}
+	    }
+    	}
+    }
+}
+
+libkadeploy2::deploy_iolib::disconnect($base);
+
+
+## Available variables are :
+## - @user_list
+## - @checked_hosts
+## - @part_list
+
+## Time to fill in database
+
+$base = libkadeploy2::deploy_iolib::connect();
+
+#rights_iolib::clean_db($base);
+
+foreach my $user (@user_list){
+    foreach my $host (@checked_hosts){
+	foreach my $device (@part_list){
+	    libkadeploy2::rights_iolib::add_user($base,$user,$host,$device);
+	}
+    }
+}
+
+libkadeploy2::deploy_iolib::disconnect($base);
+
+print "Rights granted.\n";
+
+1;
+
+
+# check_nodes
+# checks if the specified nodes exist in the database
+# parameters : base, host list (name or ip adress)
+# return value : list of hosts that exist in the database or 0 if empty
+sub check_nodes($$){
+    my $dbh = shift;
+    my $ref_hosts = shift;
+    my @checked;
+
+    foreach my $host (@{$ref_hosts}){
+	if(!libkadeploy2::deploy_iolib::node_name_to_name($dbh,$host)){
+	    my $name = libkadeploy2::deploy_iolib::node_ip_to_name($dbh,$host);
+	    if(!$name){
+		print "WARNING : node $host does not exist ; it is excluded from rights attribution\n";
+	    }else{
+		push(@checked,$name);
+	    }
+	}else{
+	    push(@checked,$host);
+	}
+    }
+    return @checked;
+}
+
+
+# check_partition
+# checks if the partition exists
+# parameters : base, disk, partition
+# return value : 0 if disk or partition does not exist
+# NB : version tr�s simpliste ; to be improved...
+#      disk_dev_to_id & part_nb_to_id should make a join
+#      with the deployed table...
+sub check_partition($$$){
+    my $dbh = shift;
+    my $dev = shift;
+    my $part = shift;
+
+#    return (deploy_iolib::disk_dev_to_id($dbh,$dev) && deploy_iolib::part_nb_to_id($dbh,$part));
+     return (libkadeploy2::deploy_iolib::disk_dev_to_id($dbh,$dev));
+}
+
+
+# check_dev
+# checks if the device exists
+# parameters : base, disk
+# return value : 0 if disk does not exist
+sub check_dev($$){
+    my $dbh = shift;
+    my $dev = shift;
+
+    return (libkadeploy2::deploy_iolib::disk_dev_to_id($dbh,$dev));
+}

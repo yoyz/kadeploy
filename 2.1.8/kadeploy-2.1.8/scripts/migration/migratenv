@@ -1,0 +1,40 @@
+#!/usr/bin/perl
+use strict;
+use warnings;
+
+use Getopt::Long;
+use libkadeploy2::conflib;
+use libkadeploy2::deploy_iolib;
+use libkadeploy2::hexlib;
+
+my $env_list;
+my $base;
+my $username;
+my $retcode=0;
+my $dbh;
+
+if ($ENV{SUDO_USER})
+{  $username=$ENV{SUDO_USER}; }
+else                     
+{ $username=$ENV{USER}; }
+
+if (!@ARGV) { print "$0 [-e environment]\n"; }
+
+GetOptions(
+	   'e=s'               => \$env_list,
+	   );
+
+
+if ($env_list)
+{
+    $base = libkadeploy2::deploy_iolib::connect();
+    my $sth = $base->prepare("update environment 
+set user='$username' where user='nobody' 
+and name='$env_list'");
+    $retcode=$sth->execute();
+    libkadeploy2::deploy_iolib::disconnect($base);
+    if ($retcode!=0) { print "environment migrated\n"; }
+    else             { print "environment not migrated\n"; }
+}
+
+exit $retcode;

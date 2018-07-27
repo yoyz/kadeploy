@@ -1,0 +1,41 @@
+README FILE OF KAVLAN
+
+1)Install :
+
+a)
+
+	You can install kavlan by typing "make install" as super user.
+
+	You can also use kavlan without installing it, you have to put kavlan in a directory and use it just by typing "./kavlan.pl" with some options ;). If you want to have kavlan as a standard command, you can specify the directory in which you have install kavlan in the environment variable $PATH.
+
+	Kavlan have to be installed on a computer which can have an access to the network appliances of the site.
+
+b)
+
+	You have to configure netword appliances to work with kavlan. You have to create vlan's on each appliance, the name have to be "KAVLAN_XXX" "XXX" means any number. After this you have to affect an IP address and a mask for each vlan on the routeur and affect a tag value. Ensure that you can route information of each vlan. The IP address must have to be in the range of cluster IP but reserved for kavlan. You can do some test to ensure that if a computer belong to anyone of the vlan it can have access to other vlan such as default vlan.
+
+	You have to activate the SNMP access to the equipments. The version used is 2c with a community which can have a manager access and you have to specify the name in the configuration file of kavlan.
+
+	If you have more than one switch, you have to configure each port connected to another switch. Each port have to be defined in all the vlan in order to trasmit the network traffic. You can do another configuration if your switch allow the port trunking technology, you can define links between switchs as trunk. This is generally present on cisco switch or modern appliances.
+
+	It is better to put the DEFAULT vlan with a tag id. The DEFAULT vlan generally contain all cluster computer with an untag mode.
+
+	After that you have to configure and use kavlan (see configuration part)
+
+2)Dependencies : 
+
+	This script need :
+		-a perl interpreter 
+		-a special module named "libsnmp-perl"
+
+	With this two things, you can run kavlan and use it.
+
+3)Configuration :
+
+	There is only one configuration file named kavlan.conf, this file have to be in the same directory as the kavlan script by default but you can specify the path with an option if you want to move this file. This file containing generals options such as site, routeur and switch informations.
+
+	There is also coresponding table to configure, if you do not want to configure them, it is not a problem kavlan can work without it. But it is more usefull and you can specify computer name instead of port/switch in the kavlan command.
+
+4)Note : 
+
+	This version allow multi switch modification and can use different type of network equipment. If you want to extand kavlan and add an equipment support just browse the code ;).

@@ -1,0 +1,84 @@
+#!/usr/bin/perl
+
+use Getopt::Long;
+use libkadeploy2::deploy_iolib;
+use libkadeploy2::rights_iolib;
+use libkadeploy2::conflib;
+use libkadeploy2::confroot;
+ 
+use strict;
+
+my $conf_root_dir;
+
+if (!@ARGV) {
+  print "Usage : kadelnode [-l|--login login]
+[-m|--machine hostname]
+[-p|--partition partition]
+[-C|--configuration <configuration root directory>]\n";
+  exit 0;
+}
+
+## declares the options
+my @user_list = ();
+my @host_list = ();
+my @part_list = ();
+
+## gets the options
+GetOptions('l=s'    => \@user_list,
+  'login=s'         => \@user_list,
+  'm=s'             => \@host_list,
+  'machine=s'       => \@host_list,
+  'p=s'             => \@part_list,
+  'partition=s'     => \@part_list,
+  'C=s'             => \$conf_root_dir,
+  'configuration=s' => \$conf_root_dir
+);
+
+
+if (!$conf_root_dir eq "") {
+  libkadeploy2::confroot::set_conf_rootdir($conf_root_dir);
+}
+libkadeploy2::confroot::get_conf_rootdir();
+libkadeploy2::confroot::info();
+
+## checks if needed options are defined
+if (!@user_list){
+    print "WARNING : no user specified, rights revoked to all users\n";
+    @user_list = ("*");
+}
+if (!@host_list){
+    print "WARNING : no host specified, rights revoked for all nodes\n";
+    @host_list = ("*");
+}
+if (!@part_list){
+    print "WARNING : no partition specified, rights revoked for all partitions\n";
+    @part_list = ("*");
+}
+
+# Configuration
+my $configuration = libkadeploy2::conflib->new();
+
+# load configuration files
+if (!$configuration->check_nodes_conf(\@host_list) || !$configuration->check_conf()) {
+    print STDERR "ERROR : problem occured loading configuration file\n";
+    exit 1;
+}
+# register configuration
+libkadeploy2::deploy_iolib::register_conf($configuration);
+
+## time to revoke rights
+my $base = libkadeploy2::deploy_iolib::connect();
+
+foreach my $user (@user_list){
+    foreach my $host (@host_list){
+	foreach my $device (@part_list){
+	    libkadeploy2::rights_iolib::del_user($base,$user,$host,$device);
+	}
+    }
+}
+
+libkadeploy2::deploy_iolib::disconnect($base);
+
+print "Done.\n";
+
+1;

@@ -1,0 +1,143 @@
+#!/usr/bin/ruby
+#-*- coding: utf-8 -*-
+
+require 'getoptlong'
+require 'karate/stress_tests'
+require 'karate/config'
+require 'ftools'
+require 'yaml'
+
+include Karate
+
+SVERSION = 0.3
+
+$config = GlobalConfig::new
+
+# Get the nodes from the OAR shell environment
+def get_nodes_from_env
+  begin
+    return IO::read(ENV['OAR_NODEFILE']).split("\n")
+  rescue TypeError
+    # The environment variable doesn't exist 
+    raise "No node specified"
+  end
+end
+
+def show_help_msg(exit_status=0)
+  puts <<END
+kadeploy-stress [OPTION] ...
+
+Supported options:
+  --help/-h
+  --version/-v
+  --yaml/-y
+  --output-dir/-o output_dir
+  --machine/-m [hostname]
+  --ssh/-s [hostname]
+  --nb-tests/-n [number]
+  --environment/-e [environment]
+  --device/-d [device]
+  --partition/-p [partition]
+  --fast-kernel-reboot/-f
+END
+  exit(exit_status)
+end
+
+# Get the needed informations for kadeploy from the command line
+# arguments
+def parse_cmd_arguments
+  # Options supported by the program
+  opts = GetoptLong.new(["--help",        "-h", GetoptLong::NO_ARGUMENT],
+                        ["--debug",       "-l", GetoptLong::NO_ARGUMENT],
+                        ["--version",     "-v", GetoptLong::NO_ARGUMENT],
+                        ["--yaml",        "-y", GetoptLong::NO_ARGUMENT],
+                        ["--fast-kernel-reboot", "-f", GetoptLong::NO_ARGUMENT],
+                        ["--output-dir",  "-o", GetoptLong::REQUIRED_ARGUMENT],
+                        ["--machine",     "-m", GetoptLong::REQUIRED_ARGUMENT],
+                        ["--ssh",         "-s", GetoptLong::REQUIRED_ARGUMENT],
+                        ["--nb-tests",    "-n", GetoptLong::REQUIRED_ARGUMENT],
+                        ["--environment", "-e", GetoptLong::REQUIRED_ARGUMENT],
+                        ["--device",      "-d", GetoptLong::REQUIRED_ARGUMENT],
+                        ["--partition",   "-p", GetoptLong::REQUIRED_ARGUMENT])
+
+
+  nodes = []
+
+  opts.each do |opt, arg|
+    case opt
+    when '--debug'
+      $config.debug = true
+    when '--yaml'
+      $config.yaml = true
+    when '--output-dir'
+      $config.output_dir = arg
+    when '--environment'
+      $config.environment = arg
+    when '--ssh'
+      $config.ssh_hostname = arg
+    when '--machine'
+      nodes << arg
+    when '--device'
+      $config.device = arg
+    when '--partition'
+      $config.partition = arg
+    when '--nb-tests'
+      $config.nb_tests = arg.to_i
+    when '--fast-kernel-reboot'
+      $config.fast_kernel_reboot = true
+    when '--help'
+      show_help_msg
+    when '--version'
+      puts "version: #{SVERSION}"
+      exit(0)
+    end
+  end
+
+  begin
+    # Check whether the output directory for the logs exists 
+    Dir::open($config.output_dir)
+  rescue SystemCallError
+    # Create the output directory as it doesn't exist
+    File::makedirs($config.output_dir)
+  end
+
+  if not (File::executable?($config.output_dir) and File::writable?($config.output_dir))
+    raise "Invalid output directory ``#{$config.output_dir}'' as it isn't writable and/or executable"
+  end
+
+  # Last chance to get the nodes...
+  nodes = get_nodes_from_env if nodes.empty?
+  
+  raise "No node specified, try --help" if nodes.empty?
+  raise "No device specified, try --help" if $config.device.nil?
+  raise "No partition specified, try --help" if $config.partition.nil?
+  raise "No environment specified, try --help" if $config.environment.nil?
+  raise "Wrong number of tests, try --help" if $config.nb_tests == 0
+  
+  nodes.sort.uniq
+end
+
+# Main function
+def main
+  begin
+    stress_tests = StressTests::new($config, parse_cmd_arguments)
+    stress_tests.run
+
+    if $config.yaml
+      YAML::dump(stress_tests.to_h, STDOUT)
+    else
+      stress_tests.display_infos(sep="  ")
+      stress_tests.display_stats
+    end
+    
+  rescue StandardError => e
+    if $config.debug
+      raise
+    else
+      STDERR.puts "ERROR: #{e}"
+      exit(1)
+    end
+  end
+end
+
+main()

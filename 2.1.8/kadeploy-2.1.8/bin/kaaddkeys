@@ -1,0 +1,81 @@
+#!/usr/bin/perl
+
+use Getopt::Long;
+use libkadeploy2::confroot;
+use libkadeploy2::pathlib;
+
+Getopt::Long::Configure ("gnu_getopt");
+
+my $authorized_file="/root/.ssh/authorized_keys";
+my $conf_root_dir="";
+my $debuglevel=0;
+my $usage = "Usage : $0 [-k|--key-file public_keyfile] [-m|--machine hostname] [-C|--configuration <directory>] -f nodefile\n";
+
+if (!@ARGV){
+    print $usage;
+    exit 0;
+}
+
+## gets the options
+GetOptions('m=s'             => \@host_list,
+           'machine=s'       => \@host_list,
+           'f=s'             => \$node_file,
+           'k=s'             => \$keyfile,
+           'key-file=s'      => \$keyfile,
+           'verbose'         => \$verbose,
+           'v'               => \$verbose,
+           'C=s'             => \$conf_root_dir,
+           'configuration=s' => \$conf_root_dir,
+           'D=i'             => \$debuglevel,
+           'debug-level=i'   => \$debuglevel
+           );
+
+
+$ENV{KADEPLOY_DEBUG_LEVEL}  = $debug_level if ($debug_level =~ /[0-4]/);
+
+# Get configuration root directory
+if (!$conf_root_dir eq "") {
+  libkadeploy2::confroot::set_conf_rootdir($conf_root_dir);
+} else {
+  $conf_root_dir = libkadeploy2::confroot::get_conf_rootdir();
+}
+libkadeploy2::confroot::info();
+
+my $test = 0;
+my $karemote_args = "";
+my $command = "";
+
+if (! -r $keyfile) {
+	print "$keyfile is not readable\n";
+	exit(1);
+}
+
+if ($node_file eq "") {
+  foreach my $i (@host_list) {
+    $test = 1;
+    $karemote_args .= "-m $i ";
+  }
+} else {
+  $test = 1;
+  $karemote_args .= "-f $node_file ";
+}
+
+if ($verbose) { $command .= "-v "; }
+
+if (!$conf_root_dir eq "") {
+  $karemote_args .= "--configuration $conf_root_dir ";
+}
+
+if ($test == 0 ) {
+  print $usage;
+  exit 0;
+}
+
+# $karemote_args .= "-c \"cat - >> $authorized_file \"";
+# $command = "cat $keyfile";
+# exec "$command | karemote $karemote_args";
+# return 1;
+my $prefix_dir = libkadeploy2::pathlib::get_leading_dirs($0);
+
+return (exec("$prefix_dir/karemote -c \"echo \$(cat $keyfile) >> $authorized_file\" ".$karemote_args));
+

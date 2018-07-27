@@ -1,0 +1,600 @@
+#!/usr/bin/perl
+# Author: Guillaume Mornet
+# Copyright (C) 2005 Inria
+# Created: 2005.05.30
+# 
+
+# Lists deployed environments
+
+# We use libraries from kadeploy2
+
+use strict;
+use warnings;
+
+use Getopt::Long;
+use libkadeploy2::conflib;
+use libkadeploy2::deploy_iolib;
+use libkadeploy2::hexlib;
+use libkadeploy2::confroot;
+
+# DB accessors
+sub get_environments($);
+#sub get_environments_byname($$);
+sub get_environments_by_name_and_user($$$);
+sub delete_environments_by_name_and_user($$$);
+# Displayers
+sub print_environment($);
+sub print_environment_envname_user($$);
+sub print_all_environment_by_user($$$);
+
+sub print_usage();
+sub print_user();
+
+sub get_unixuser();
+sub get_userdb($);
+sub get_environments_by_user($$);
+
+# Command-line arguments
+
+# Name of the environments the user wants to display. If empty, we list a summary
+my @env_list;
+my @envToDelete;
+my @envToAdd;
+		      
+# True if the user wants help
+my $display_help;
+my $tmpuser;   
+
+# db handler
+my $base;
+my @users; # -l user1 -l user2 ....
+my $user; # -l user
+my $username;
+my $spoofuser;
+my $host;
+my @hostlist;
+my $hostfile;
+my $clustername;
+my $deploy_user;
+my $conf_root_dir;
+
+# get the command-line options
+GetOptions('e=s'               => \@env_list,
+           'environment=s'     => \@env_list,
+	   'a=s'               => \@envToAdd,
+	   'add=s'             => \@envToAdd,
+	   'd=s'               => \@envToDelete,
+	   'delete=s'          => \@envToDelete,
+	   'l=s'               => \@users,
+	   'z=s'	       => \$clustername,
+	   'cluster=s'         => \$clustername,
+	   'm=s'               => \@hostlist,
+	   'f=s'               => \$hostfile,
+	   'login=s'           => \@users,
+           'configuration=s'   => \$conf_root_dir,
+	   'h!'                => \$display_help,
+	   'help!'             => \$display_help,
+	   );
+
+
+if (!$conf_root_dir eq "") {
+      libkadeploy2::confroot::set_conf_rootdir($conf_root_dir);
+    }
+libkadeploy2::confroot::get_conf_rootdir();
+libkadeploy2::confroot::info();
+
+## Configuration
+my $configuration = libkadeploy2::conflib->new();
+if ( !$configuration->check_conf()) {
+	      print "ERROR : problem occured while loading Kadeploy configuration file.\n";
+	      exit 1;
+}
+my $ka_install_dir = $configuration->get_conf("kadeploy2_directory");
+
+if ($ENV{SUDO_USER})
+{  $username=$ENV{SUDO_USER}; }
+else                     
+{ $username=$ENV{USER}; }
+
+
+$user=$username;
+$spoofuser=$users[$#users]; #get last -l
+
+if ($spoofuser) { $user=$spoofuser; }
+else { $spoofuser=$username; }
+
+if (!$clustername eq "") {
+	$configuration->set_clustername($clustername);
+	print STDERR "using settings for cluster " . $clustername . "\n";
+} else {
+	print STDERR "using settings for default cluster\n";
+}
+# load configuration files this part is overwritten by any specified nodelist
+if (!$configuration->check_conf()) {
+        print STDERR "ERROR : problem occured loading configuration file\n";
+        exit 1;
+}
+# register configuration
+libkadeploy2::deploy_iolib::register_conf($configuration);
+
+
+if ($display_help) {
+    print_usage();
+    exit 0;
+}
+
+if ($hostfile)
+{
+    my $line;
+    open(NODEFILE,$hostfile);
+    while ($line = <NODEFILE>)
+    {
+	if ($line =~ /([a-zA-Z0-9\.-]+)/) { $line = $1; }
+	chomp($line);
+	push(@hostlist, $line);
+    }
+    close(NODEFILE);
+}
+
+
+if (@hostlist)
+{
+    # load configuration files
+    if (!$configuration->check_nodes_conf(\@hostlist) || !$configuration->check_conf()) {
+	   print "ERROR : problem occured loading configuration file\n";
+	   exit 1; 
+    }
+    libkadeploy2::deploy_iolib::register_conf($configuration);
+    my $envid;
+    my $envname;
+    my $host;
+    my $nodeid;
+    $base = libkadeploy2::deploy_iolib::connect();
+    if (@hostlist) {
+	print STDERR "Environment name for node\n";
+	print STDERR "-------------------------\n";	
+    }
+    foreach $host (@hostlist)
+    {
+	$nodeid=libkadeploy2::deploy_iolib::node_name_to_id($base,$host);
+	if ($nodeid)
+	{
+	    $envid=libkadeploy2::deploy_iolib::node_last_envid($base,$host);
+	    if ($envid)
+	    {
+		$envname=libkadeploy2::deploy_iolib::env_id_to_name($base,$envid);
+		if ($envname)
+		{
+		    print "$host : $envname\n";
+		}
+		else
+		{
+		    print STDERR "No environment found for node $host\n";
+		}
+	    }
+	}
+	else
+	{
+	    print STDERR "WARNING : The host $host doesn't exist in the DB\n";
+	}
+    }
+    libkadeploy2::deploy_iolib::disconnect($base);
+    exit 0;
+}
+
+
+my @listuser;
+my $i;
+$tmpuser="";
+$base = libkadeploy2::deploy_iolib::connect();
+@listuser=get_userdb($base);
+foreach $i (@listuser)
+{
+    if ($i eq $user)
+    {
+	$tmpuser=$i;
+    }
+}
+print STDERR "user selected : $spoofuser\n\n";
+print_user();   
+libkadeploy2::deploy_iolib::disconnect($base);
+
+
+if (@envToAdd)
+{
+    foreach $i (@envToAdd)
+    {
+	system("$ka_install_dir"."/bin/karecordenv -fe $i")
+    }
+    exit(0);
+}
+
+
+if (@envToDelete)
+{
+    $base = libkadeploy2::deploy_iolib::connect();
+    my $env_name;
+    foreach $env_name (@envToDelete) 
+    {
+	my %environments = get_environments_by_name_and_user($base, $env_name,$username);
+	if (scalar(keys(%environments)) != 0) 
+	{
+	    if (delete_environments_by_name_and_user($base,$env_name,$username)==1)
+	    { 
+		print "environment $env_name deleted succefully\n"; 
+	    }
+	    else
+	    {
+		print "ERROR :  removing $env_name\n";
+	    }
+	}
+	else
+	{
+	    print "Environment $env_name doesn't exist...\n";
+	}
+    }
+    libkadeploy2::deploy_iolib::disconnect($base);
+    exit(0);
+}
+
+# now we need deploy_user for the current cluster 
+$deploy_user = $configuration->get_conf("deploy_user");
+if (@env_list)
+    {
+	if (!($spoofuser eq $deploy_user))
+	{
+	    print_environment_envname_user(\@env_list,$spoofuser);
+	}
+	print_environment_envname_user(\@env_list,$deploy_user);
+	exit(0);
+    }
+    
+
+
+# FINAL ELSE 
+if (! @env_list && ! @envToDelete){
+    # List all the environemnts
+    $base = libkadeploy2::deploy_iolib::connect();
+    my $start=1;
+    my @userlist=get_userdb($base);
+
+    if (!($spoofuser eq $deploy_user))
+    {
+	print_all_environment_by_user($base,$spoofuser,$start);
+	$start--;
+    }
+    print_all_environment_by_user($base,$deploy_user,$start);	
+
+    print "\n\n";
+
+    libkadeploy2::deploy_iolib::disconnect($base);
+    exit(0);
+}
+
+
+
+
+	
+
+exit 0;
+
+
+
+
+
+########################################END OF MAIN########################################
+sub print_all_environment_by_user($$$)
+{
+    my $base=shift;
+    my $spoofuser=shift;
+    my $start=shift;
+    my %environments = get_environments_by_user($base,$spoofuser);
+    my $format = "%-17s %12s %-15s %s\n";
+
+    if ($start)
+    {   
+	printf ($format, "Name", "Version", "user", "Description");
+	printf ($format, "----", "-------", "----", "-----------");
+    }
+
+    
+    while ((my $envid, my $envinfo) = each(%environments)) 
+    {
+	my $description = $envinfo->{'description'};
+	$description = "-" unless defined($description);
+	
+        printf($format, $envinfo->{'name'}, $envinfo->{'version'}, 
+	       $envinfo->{'user'}, $description
+	       );
+    }
+    
+}
+
+
+
+
+
+
+
+sub print_environment_envname_user($$)
+{
+    my $ref_env_list=shift;
+    my $user=shift;
+    my $spoofuser;
+    my @env_list;
+    
+    $spoofuser=$user;
+    @env_list=@$ref_env_list;
+    
+    my %environments;
+    $base = libkadeploy2::deploy_iolib::connect();
+    for my $env_name (@env_list) 
+    {
+	%environments = get_environments_by_name_and_user($base, $env_name,$spoofuser);
+	
+	if (scalar(keys(%environments)) == 0) 
+	{
+	    print STDERR "No environment named '$env_name' with user $spoofuser\n";
+	}
+    }
+    
+    while ((my $envid, my $envinfo) = each(%environments)) 
+    {
+	print_environment($envinfo);
+    }
+    libkadeploy2::deploy_iolib::disconnect($base);
+}
+
+
+sub print_usage() {
+    print "Usage: \t$0 \n";
+    print "                                                                     - lists my recorded environments\n";
+    print "            -e | --environment env1 ...                              - lists a given environment\n";
+    print "            -a | --add env1 ...                                      - add this environment (it must be yours)\n";
+    print "            -d | --delete env1 ...                                   - delete this environment (it must be yours)\n";
+    print "            -l | --login  login                                      - list environment from user 'login'\n";
+    print "            --listlogin                                              - list all 'login' recorded\n";
+    print "            -c | --cluster clustername                               - gives information according to the named cluster\n";
+    print "            -m host                                                  - give last environment deployed on the host\n";
+    print "            -f nodesfile                                             - give last environment deployed on the nodesfile\n";
+    print "            -C | --configuration <Kadeploy configuration directory>  - configuration directory to use\n";
+    print "            -h | --help                                              - this help\n";
+}
+
+sub print_user()
+{
+    my @listuser;
+    my $i;
+    my $base = libkadeploy2::deploy_iolib::connect();
+    @listuser=get_userdb($base);
+
+    print STDERR "kadeploy users:\n";
+    print STDERR "---------------\n";
+    foreach $i (@listuser)
+    {
+	if ($i eq $user)
+	{
+	    print STDERR "[$i]\n";
+	}
+	else
+	{
+	    print STDERR "$i\n";
+	}
+    }
+    print "\n";   
+    libkadeploy2::deploy_iolib::disconnect($base);    
+}
+
+
+# Displays an environment on stdout with a oarnodes-like format
+sub print_environment($) 
+{
+    my $env = shift;
+    
+    my $format = "%s = %s\n";
+    my @attributes = ('name','id', 'version', 'description', 'author', 'filebase',
+		      'filesite', 'size', 'initrdpath', 'kernelpath',
+		      'kernelparam', 'fdisktype', 'filesystem', 'siteid','optsupport','user');
+    
+    print "#$env->{name} v$env->{version}\n\n";
+    
+    for my $attr (@attributes) 
+    {
+	if ($attr =~ /^fdisktype$/)
+	{
+	    printf($format,$attr, libkadeploy2::hexlib::hexalize($env->{$attr})) if defined($env->{$attr});
+	}
+	else
+	{
+	    printf($format, $attr, $env->{$attr}) if defined($env->{$attr});
+	}
+    }
+
+       print "\n";
+}
+
+
+# Return all the environments
+# Fixme: does not return all fields
+sub get_environments($) {
+    my $dbh = shift;
+    
+    my %environments;
+    
+    my $sth = $dbh->prepare("SELECT * FROM environment");
+    $sth->execute();
+
+    while (my $ref = $sth->fetchrow_hashref()) 
+    {
+	$environments{$ref->{id}}
+	= {
+	    id => $ref->{id}, 
+	    name => $ref->{name}, 
+	    version => $ref->{version},
+	    author => $ref->{author}, 
+	    description => $ref->{description},
+	    fdisktype => $ref->{fdisktype}, 
+	    filesystem => $ref->{filesystem}	   
+	};
+    }
+	
+
+		          				   
+    $sth->finish();							      
+
+    return %environments;
+}
+
+
+# Returns all environments that match the given name
+sub get_environments_by_name_and_user($$$)
+				     {
+
+    my $dbh = shift;
+    my $envname = shift;
+    my $tmpuser = shift;
+
+    my %environments;
+    
+    my $sth = $dbh->prepare("
+SELECT * 
+FROM environment 
+WHERE 
+environment.name=?
+AND 
+environment.user=?
+");
+    $sth->execute($envname,$tmpuser);
+
+    while (my $ref = $sth->fetchrow_hashref()) {
+        $environments{$ref->{id}} 
+	= {
+	    id => $ref->{id}, 
+	    name => $ref->{name}, 
+	    version => $ref->{version},
+	    author => $ref->{author}, 
+	    description => $ref->{description},
+	    filebase => $ref->{filebase}, 
+	    filesite => $ref->{filesite},
+	    size => $ref->{size}, 
+	    initrdpath => $ref->{initrdpath},
+	    kernelpath => $ref->{kernelpath}, 
+	    kernelparam => $ref->{kernelparam},
+	    fdisktype => $ref->{fdisktype}, 
+	    filesystem => $ref->{filesystem},
+	    siteid => $ref->{siteid}, 
+	    user   => $ref->{user},
+	    optsupport   => $ref->{optsupport},
+	};
+    }
+			          				   
+    $sth->finish();							      
+
+    return %environments;
+}
+
+sub get_environments_by_user($$) {
+
+    my $dbh = shift;
+    my $tmpuser = shift;
+        
+    my %environments;
+    
+    my $sth = $dbh->prepare("
+SELECT * 
+FROM environment 
+WHERE environment.user=?");
+    $sth->execute($tmpuser);
+
+    while (my $ref = $sth->fetchrow_hashref()) {
+        $environments{$ref->{id}} 
+	    = {
+		id => $ref->{id}, 
+		name => $ref->{name}, 
+		version => $ref->{version},
+		author => $ref->{author}, 
+		description => $ref->{description},
+		filebase => $ref->{filebase}, 
+		filesite => $ref->{filesite},
+		size => $ref->{size}, 
+		initrdpath => $ref->{initrdpath},
+		kernelpath => $ref->{kernelpath}, 
+		kernelparam => $ref->{kernelparam},
+		fdisktype => $ref->{fdisktype}, 
+		filesystem => $ref->{filesystem},
+		siteid => $ref->{siteid},
+		user   => $ref->{user},
+	};
+    }
+			          				   
+    $sth->finish();							      
+
+    return %environments;
+}
+
+
+sub get_userdb($)
+{
+    my $dbh = shift;
+
+    my @listuser;
+    my @tmp;
+
+    my $sth = $dbh->prepare("
+select user 
+from environment 
+group by user");
+    $sth->execute();
+    while (my $ref =  $sth->fetchrow_hashref()) 
+    {
+	@tmp=$ref->{user};
+	push(@listuser, @tmp);
+    }
+    return @listuser;
+}
+
+# Return 1 if success
+sub delete_environments_by_name_and_user($$$) {
+    my $dbh = shift;
+    my $envname = shift;
+    my $tmpuser = shift;
+    my $sth;
+    my $result;
+
+    if ($user eq $tmpuser)
+    {
+	$sth = $dbh->prepare("
+DELETE FROM environment 
+WHERE 
+environment.name=? 
+and 
+environment.user=?
+");
+	$result=$sth->execute($envname,$user);
+	$sth->finish;
+    }
+    else
+    {
+	print "WARNING : You are not allowed to remove $envname with user $user... you are $username\n";
+	$result=0;
+    }
+    return $result;
+}
+
+
+#Retun username 
+#depend of getent
+sub get_unixuser()
+{
+    my $line;
+    my $user;
+    open(FD,"printenv|");
+    while ($line=<FD>)
+    {
+	if ($line=~/^USER=(.+)$/)
+	{
+	    $user=$1;
+	}
+    }
+    return $user;
+}

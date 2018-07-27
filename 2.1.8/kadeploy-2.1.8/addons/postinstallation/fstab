@@ -1,0 +1,8 @@
+# /etc/fstab: static file system information.
+#
+# <file system>	<mount point>	<type>	<options>		<dump>	<pass>
+/dev/sda5	/tmp		ext2	defaults		1	0
+/dev/sda1	none		swap	sw			0	0
+proc		/proc		proc	defaults		0	0
+/dev/fd0	/floppy		auto	user,noauto		0	0
+/dev/cdrom	/cdrom		iso9660	ro,user,noauto		0	0

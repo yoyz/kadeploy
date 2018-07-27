@@ -1,0 +1,12 @@
+#!/bin/sh -e
+
+if [ $# -lt 2 ]; then
+   echo "Usage: ./karate-ssh-wrapper hostname karate-cmd"
+   exit 1
+fi
+
+NODES=`cat $OAR_NODEFILE | awk '/^(.*)$/ {printf " -m %s", $1}'`
+COMMAND="ssh -o BatchMode=yes -o ConnectTimeout=2 -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null $* --ssh `hostname --fqdn` $NODES"
+
+echo "Calling ''$COMMAND''..."
+exec $COMMAND

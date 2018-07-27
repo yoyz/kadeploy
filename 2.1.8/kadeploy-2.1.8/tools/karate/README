@@ -1,0 +1,21 @@
+karate
+======
+
+Karate aims to test kadeploy in order to get failure rate, deployments
+duration and  nodes which  fail often.  It  allows to run  tests which
+includes ``n'' concurrent deployments (by default 8).
+
+It contains the following scripts in ``bin/'':
+
+- ``karate'': main scripts.
+
+- ``karate-wrapper'':  set RUBYLIB  environment  variable (mainly  for
+  cmdctrl) and then run karate.
+
+- ``karate-ssh-wrapper'':  let you  run  ``karate'' on  a machine  and
+  kadeploy on  another one, useful  when the reference  environment is
+  not up-to-date on the frontend.
+
+You  can obtain  some helps  about these  scripts by  using ``--help''
+parameter. You must modify the value of SRC by editing *wrapper scripts
+in bin/.

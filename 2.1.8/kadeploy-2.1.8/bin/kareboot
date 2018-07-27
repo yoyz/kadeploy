@@ -1,0 +1,325 @@
+#!/usr/bin/perl
+
+#-------------------------------------------------------------
+# Search for config file : <config directory>/deploy_cmd.conf
+#-------------------------------------------------------------
+
+#-----------
+# Functions
+#-----------
+use File::Copy;
+use Getopt::Long;
+use libkadeploy2::conflib;
+use libkadeploy2::bootlib;
+use libkadeploy2::deploy_iolib;
+use libkadeploy2::rights_iolib;
+use libkadeploy2::node_bd;
+use libkadeploy2::nodes;
+use libkadeploy2::confroot;
+use strict;
+
+#------------------
+# Global variables
+#------------------
+my $conf_root_dir;
+my $soft = 0;
+my $hard = 0;
+my $deploy = 0;
+my $noreboot = 0;
+my @host_list = ();
+my $host;
+my $env = "";
+my $device="";
+my $reboot = "";
+my $query = "";
+my $kernel_parameters = "";
+my @hosts_to_reboot = (); # list of nodes to reboot
+my $verbose = 0;
+my $debug = 1;
+my $node_file;
+my $user_request_grub = 0;
+my $username = getpwuid($ENV{SUDO_UID}); # real user
+my $kareboot_usage = "Usage : kareboot [-s|--soft] \
+[-h|--hard] \
+[-d|--deploy] \
+[-n|--noreboot] \
+[-m|--machine hostname] \
+-f nodefile \
+[-e|--environment name] \
+[-p|--partition partition] \
+[-kp|--kernel-parameters \"kernel parameters\"]\
+[-C|--configuration <configuration root directory>]\
+[--grub]\n";
+
+if (!@ARGV){
+    print $kareboot_usage;
+    exit 0;
+}
+
+#-------------
+# Get options
+#-------------
+GetOptions('m=s'        => \@host_list,
+  'machine=s'           => \@host_list,
+  'f=s'                 => \$node_file,
+  'e=s'                 => \$env,
+  'environment=s'       => \$env,
+  's'                   => \$soft,
+  'soft'                => \$soft,
+  'h'                   => \$hard,
+  'hard'                => \$hard,
+  'd'                   => \$deploy,
+  'deploy'              => \$deploy,
+  'n'                   => \$noreboot,
+  'noreboot'            => \$noreboot,
+  'p=s'                 => \$device,
+  'partition=s'         => \$device,
+  'kp=s'	        => \$kernel_parameters,
+  'kernel-parameters=s' => \$kernel_parameters,
+  'verbose'             => \$verbose,
+  'v'                   => \$verbose,
+  'C=s'                 => \$conf_root_dir,
+  'configuration=s'     => \$conf_root_dir, 
+  'grub!'               => \$user_request_grub
+);
+
+if (!$conf_root_dir eq "") {
+  libkadeploy2::confroot::set_conf_rootdir($conf_root_dir);
+}
+libkadeploy2::confroot::get_conf_rootdir();
+libkadeploy2::confroot::info();
+
+## Configuration
+my $configuration = libkadeploy2::conflib->new();
+
+
+if ($node_file)
+{
+    my $line;
+    open(NODEFILE,$node_file) or die "Can't open node_file : $node_file\n";
+    while ($line = <NODEFILE>)
+    {
+        if ($line =~ /([a-zA-Z0-9-\.]+)/) { $line = $1; }
+        chomp($line);
+        push(@host_list, $line);
+    }
+    close(NODEFILE);
+}
+
+
+
+## checks if needed options are defined
+if (!scalar(@host_list)){
+    print $kareboot_usage;
+    exit 0;
+}
+if ($soft && $hard){
+    print "ERROR : soft and hard reboot options are exclusive\n";
+    print "ERROR : please select only one of them at once\n";
+    exit 0;
+}
+
+if (($noreboot && $soft) || ($noreboot && $hard)){
+    print "ERROR : no reboot and soft or hard reboot should be exclusive\n";
+    print "ERROR : please select only one of them at once\n";
+    exit 0;
+}
+
+if (($deploy && $env) || ($deploy && $device) || ($env && $device)){
+    print "ERROR : please select EITHER a deployment reboot OR a reboot on a partition OR a reboot on an environment\n";
+    exit 0;
+}
+
+
+# load configuration files
+if (!$configuration->check_nodes_conf(\@host_list) || !$configuration->check_conf()) {
+    print "ERROR : problem occured loading configuration file\n";
+    exit 1;
+}
+# add custom kernel parameters to configuration
+if (!$kernel_parameters eq "") {
+    $configuration->set_conf("custom_kernel_parameters", $kernel_parameters);
+    print "nodes will be rebooted using custom kernel parameters\n";
+}
+# register configuration for the different modules
+libkadeploy2::deploy_iolib::register_conf($configuration);
+libkadeploy2::node_bd::register_conf($configuration);
+libkadeploy2::nodes::register_conf($configuration);
+libkadeploy2::bootlib::register_conf($configuration);
+
+print "configuring a node from cluster: " . $configuration->get_clustername() . "\n";
+
+# checks if tftp folders exist
+my $tftp = $configuration->get_conf("tftp_repository") . $configuration->get_conf("tftp_relative_path");
+if(!(-e $tftp)){
+    print "ERROR : unknown tftp folder\n";
+    print "ERROR : please check your configuration file\n";
+    exit 0;
+}
+
+
+# defines reboot type
+if ($hard) {
+    $reboot = "hardboot";
+} elsif ($noreboot) {
+    $reboot = "noreboot";
+} else { # default is soft
+    $reboot = "softboot";
+}
+
+# defines query type
+if ($deploy) {
+    $query = "deployboot";
+} elsif ($env) {
+    $query = "envboot";
+} elsif ($device) {
+    $query = "devboot";
+}
+
+## Available variables are :
+## - @host_list - list of hosts to reboot
+## - $env - environment name
+##  OR
+## - $device - device and partition number
+
+my %cmd = $configuration->check_cmd();
+my $deployuser=$configuration->get_conf("deploy_user");
+my $base = libkadeploy2::deploy_iolib::connect();
+
+
+
+#Check rights on DB if user ! deploy or root
+if ($username eq "root" ||
+    $username eq $deployuser )
+{
+    print "Reboot command launch by admin\n";
+}
+else
+{
+    foreach $host (@host_list)
+    {
+	my @hl=($host);
+	if ($device)
+	{
+	    if (libkadeploy2::rights_iolib::check_rights_kadeploy($base,$username,\@hl,$device)==0)
+	    {
+		print "ERROR : you are not allowed to reboot on partition $device on node $host\n";
+		exit 1;
+	    }
+	}
+	else
+	{
+	    if (libkadeploy2::rights_iolib::check_lazy_rights_kadeploy($base,$username,\@hl)==0)
+	    {
+		print "ERROR : you are not allowed to reboot node $host\n";
+		exit 1;                                                                                    
+	    }                                                                                              
+	}                                                                                                  
+    }
+}
+
+
+
+
+foreach $host (@host_list){
+    my $dev = "";
+    my $part = "";
+    my %node_info;
+    my @env_info = ();
+    
+    # debug print 
+    # print "NOREBOOT = $noreboot ; SOFT = $soft ; HARD = $hard ; DEPLOY = $deploy\n";
+    my $base = libkadeploy2::deploy_iolib::connect();
+    if( (!$cmd{$host}{$reboot}) && (!$noreboot)){
+	print "WARNING : no $reboot command found for $host !\n";
+    } else {
+	# debug print
+	# print "to be executed : $host -> $cmd{$host}{$reboot}\n";
+	
+	
+	if($deploy) {
+	  if(!$cmd{$host}{$query}){
+	    print "WARNING : no $query command found for $host !\n";
+	  } else{
+	    system("$cmd{$host}{$query}");
+	    push (@hosts_to_reboot, $host);
+	  }
+	} elsif ($env) {
+	  # searches for partition with requested environment
+	  my @res = libkadeploy2::deploy_iolib::search_deployed_env($base,$env,$host);
+	  if(scalar(@res)) {
+	    # gets device and part number of the first partition by default for the moment
+	    $dev  = libkadeploy2::deploy_iolib::disk_id_to_dev($base,$res[0][0]);
+	    $part = libkadeploy2::deploy_iolib::part_id_to_nb($base,$res[0][1]);
+		
+	    # debug print
+	    # print "DEV = $dev ; PART = $part ; That's it !\n";
+
+	    my $deploy_id = libkadeploy2::deploy_iolib::get_deploy_id($base,$host,$dev,$part);
+	    if(!$deploy_id) {
+	      print "WARNING : target node/device/partition does not exist or partition is not currently correctly deployed\n";
+	    } else {
+	      @env_info = libkadeploy2::deploy_iolib::deploy_id_to_env_info($base,$deploy_id);
+	    }
+	  }
+
+	} elsif($device) {
+	  # separates device and partition number from $device
+	  $dev = substr($device, 0, 3);
+	  my @nb = split(/$dev/, $device);
+	  $part = $nb[1];
+
+	  # gets the environment installed on
+	  my $deploy_id = libkadeploy2::deploy_iolib::get_deploy_id($base,$host,$dev,$part);
+	  if (!$deploy_id) {
+	    print "WARNING : target node/device/partition does not exist or partition is not currently correctly deployed\n";
+	  } else {
+	    @env_info = libkadeploy2::deploy_iolib::deploy_id_to_env_info($base,$deploy_id);
+	  }
+
+	} else { # no environnement or device to boot on specified
+	    print ("[VERBOSE] No environement or device specified for $host added to nodes to reboot\n") if $debug;
+	    push (@hosts_to_reboot, $host);
+	}
+
+	if ($dev && $part && scalar(@env_info)) {
+	  # grub and pxe
+	  my $ip = libkadeploy2::deploy_iolib::node_name_to_ip($base,$host);
+	  $node_info{$ip} = [$dev,$part];
+	  libkadeploy2::bootlib::manage_grub_pxe(\%node_info,\@env_info, $user_request_grub);
+	  push (@hosts_to_reboot, $host);
+	}
+	libkadeploy2::deploy_iolib::disconnect($base);
+      }
+  }
+
+if ($noreboot) {
+  print ("[VERBOSE] noreboot option chosen\n") if ($verbose);
+  exit (1);
+}
+
+
+
+
+# create node set
+my $nodes_set = libkadeploy2::nodes->new("deployment",$verbose);
+my $tmp_node;
+
+foreach my $host (@hosts_to_reboot) {
+    $tmp_node = libkadeploy2::node_bd->new($host, 0, 0, 0, 0);
+
+    if ($tmp_node) {
+        $nodes_set->add($tmp_node);
+    }
+    else {
+        print "node $host not included in current deployment\n";
+    }
+}
+
+if (!$hard) {
+    $nodes_set->rebootMyNodes("softboot");
+} else {
+    $nodes_set->rebootMyNodes("hardboot");
+}
+
+exit(0);

@@ -1,0 +1,2 @@
+* Write the logs to the proper host/path when using ``--ssh-hostname''?
+* Add the median to the summary?

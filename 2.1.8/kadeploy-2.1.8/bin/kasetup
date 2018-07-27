@@ -1,0 +1,1280 @@
+#!/usr/bin/perl
+
+use libkadeploy2::confroot;
+use strict;
+use warnings;
+use Getopt::Long;
+
+
+my $kadeploy_config_dir="";
+
+my @listfiletowrapuser=(
+			"kaconsole",
+			"kadeploy",
+			"kaenvironments",
+			"kareboot",
+			"karecordenv",
+			"migratenv",
+#			"mcat_rsh.pl",
+#			"mcat_ssh.pl",
+#			"sentinelle.pl",
+#			"setup_pxe.pl",
+			);			
+
+my @listfiletowraproot=(
+			"kaadduser",
+			"kadeluser",
+			"kanodes",
+			"kadatabase",
+			"kasetup",
+			);
+
+my $conf_root_dir;
+my $checkdeployconf;
+my $checksudoers;
+my $printvalidsudoers;
+my $checkwriteaccess;
+my $checkbinfiles;
+my $help;
+my $sudowrapping;
+my $copybinfiles;
+my $createtftp;
+my $printvalidfdisk;
+my $printvalidfstablinux;
+my $rootdev;
+my $rootpartnumber;
+my $swappartnumber;
+my $printpreinstallconf;
+my $exportenv;
+my $chmodconf;
+
+sub help();
+sub check_etc_deploy();
+sub checksudoers();
+sub checkdeployconf();
+sub checkwriteaccess();
+sub checkbinfiles();
+sub sudowrapping();
+sub copybinfiles();
+sub printvalidsudoers();
+sub printvalidfdisk($);
+sub createtftp();
+sub loadpartitionfile($);
+sub printpart($);
+sub printfdiskformat($);
+sub printfdiskdeleteprimary();
+sub printfdiskwrite();
+sub printpreinstallconf($);
+sub checkcorrectness($);
+sub printvalidfstablinux($$);
+sub getlinuxswapdevicenumber($);
+sub exportenv();
+sub chmodconf();
+
+GetOptions('checkdeployconf!' => \$checkdeployconf,
+  'checksudoers!'             => \$checksudoers,
+  'printvalidsudoers!'        => \$printvalidsudoers,
+  'printvalidfdisk!'          => \$printvalidfdisk,
+  'loadpartitionfile=s'       => \$partitionfile,
+  'lpf=s'                     => \$partitionfile,
+  'printvalidfstab!'          => \$printvalidfstablinux,
+  'rootdev=s'                 => \$rootdev,
+  'rootpartnumber=i'          => \$rootpartnumber,
+  'checkwriteaccess!'         => \$checkwriteaccess,
+  'checkbinfiles!'            => \$checkbinfiles,
+  'copybinfiles!'             => \$copybinfiles,
+  'printpreinstallconf!'      => \$printpreinstallconf,
+  'sudowrapping'              => \$sudowrapping,
+  'createtftp'                => \$createtftp,
+  'exportenv'                 => \$exportenv,
+  'chmodconf'                 => \$chmodconf,
+  'h!'                        => \$help,
+  'C=s'                       => \$conf_root_dir,
+  'configuration=s'           => \$conf_root_dir
+);
+
+# Get configuration root directory
+if (!$conf_root_dir eq "") {
+  libkadeploy2::confroot::set_conf_rootdir($conf_root_dir);
+}
+$kadeploy_config_dir = libkadeploy2::confroot::get_conf_rootdir();
+libkadeploy2::confroot::info();
+
+my $deployconf=$kadeploy_config_dir."/"."deploy.conf";
+my $deploycmdconf=$kadeploy_config_dir."/"."deploy_cmd.conf";
+my $partitionfile=$kadeploy_config_dir."/"."clusterpartition.conf";
+my $nodesfile=$kadeploy_config_dir."/"."clusternodes.conf";
+
+
+if ($help)
+{
+    help();
+    exit(0);
+}
+
+if ($checkdeployconf      ||
+    $checksudoers         || 
+    $printvalidsudoers    ||
+    $checkwriteaccess     ||
+    $checkbinfiles        ||
+    $copybinfiles         ||
+    $createtftp           ||
+    $printvalidfdisk      ||
+    $printvalidfstablinux ||
+    $sudowrapping         ||
+    $printpreinstallconf  ||
+    $exportenv            ||
+    $chmodconf
+    )
+{
+
+
+    if (!check_etc_deploy()) { print "there is problem with ".$kadeploy_config_dir."\n"; exit 1; }
+
+
+    use libkadeploy2::conflib;
+    if ($printvalidfstablinux) {  printvalidfstablinux($rootdev,$rootpartnumber); } 
+    if ($checkdeployconf)      { if (!checkdeployconf()) { print "Failed\n"; exit 1; } else { print "OK\n";} }
+    if ($checksudoers)         { if (!checksudoers())    {    print "Failed\n"; exit 1; } else { print "OK\n";}  }
+    if ($checkbinfiles)        { if (checkdeployconf())  { checkbinfiles(); } }
+    if ($copybinfiles)         { if (check_etc_deploy() && checkdeployconf())  { copybinfiles(); } }
+    if ($sudowrapping)         { if (checkdeployconf())  { sudowrapping(); } }
+    if ($printvalidsudoers)    { if (checkdeployconf()) { printvalidsudoers(); } }
+    if ($createtftp)           { createtftp(); }
+    if ($printvalidfdisk)      { printvalidfdisk($partitionfile); }    
+    if ($printpreinstallconf)  { printpreinstallconf($partitionfile); }
+    if ($exportenv)            { exportenv(); }
+    if ($chmodconf)            { chmodconf(); }
+    exit 0;
+}
+else
+{
+    help();
+    exit 1;
+    
+}
+
+################################################################################
+sub sort_par_num { return $a <=> $b }
+
+sub chmodconf()
+{
+    my $kadeployuser=libkadeploy2::conflib::get_conf("deploy_user");
+    my $kadeploydir=libkadeploy2::conflib::get_conf("kadeploy2_directory");
+    my $kasudowrapperfile="$kadeploydir/bin/kasudowrapper.sh";
+    
+    if ($ENV{USER} eq "root")
+    {
+	system("chmod 400 $deployconf");
+	system("chmod 400 $deploycmdconf");
+	system("chmod 400 $partitionfile");
+	system("chmod 400 $nodesfile");
+	
+	system("chmod 700 $kadeploy_config_dir");
+	system("chown $kadeployuser $kadeploy_config_dir");   # la conf appartient a deploy
+	
+	system("chmod 755 $kasudowrapperfile");           # le wrapper doit pouvoir etre ecris par deploy
+	system("chown $kadeployuser $kasudowrapperfile"); 
+	
+	print STDERR "chmod configuration file done\n";
+    }
+    else
+    {
+	print STDERR "You must be root ( user : $ENV{USER} )\n";
+	exit 1;
+    }
+}
+
+sub exportenv()
+{
+    my $kadeploydir=libkadeploy2::conflib::get_conf("kadeploy2_directory");
+    my $kadeployuser=libkadeploy2::conflib::get_conf("deploy_user");
+    my $kasudowrapperfile="$kadeploydir/bin/kasudowrapper.sh";
+    my $line;
+    my $tmpfile="";
+    if (-e "$kasudowrapperfile") 
+    {
+	open(FH,"<$kasudowrapperfile") or die "can't read $kasudowrapperfile\n";
+	while ($line=<FH>)
+	{
+	    if ($line=~/^DEPLOYDIR=.*$/)
+	    {
+		$line="DEPLOYDIR=$kadeploydir\n";
+	    }
+	    if ($line=~/^DEPLOYUSER=.*$/)
+	    {
+		$line="DEPLOYUSER=$kadeployuser\n";
+	    }
+	    $tmpfile.=$line;
+	}
+	close(FH);
+	if (length($tmpfile)>0)
+	{
+	    open(FH,">$kasudowrapperfile") or die "can't write  $kasudowrapperfile\n";
+	    print FH $tmpfile;
+	    close(FH);	    
+	    print STDERR "export completed\n";    
+	}
+    }
+    else
+    {
+	print STDERR "can't find $kasudowrapperfile\n";
+	exit 1;
+    }
+}
+
+sub printvalidfstablinux($$)
+{
+    my $rootdev=shift;
+    my $rootpartnumber=shift;
+    my $swapdevnumber=shift;
+    
+    my %disk;
+    %disk=loadpartitionfile($partitionfile);
+
+    $swapdevnumber=getlinuxswapdevicenumber(\%disk);
+
+    if (!$rootdev)
+    {
+	print STDERR "ERROR : rootdev not set\n";
+	exit 1;
+    }
+
+    if (!$rootpartnumber)
+    {
+	print STDERR "ERROR : rootpartnumber not set\n";
+	exit 1;
+    }
+
+
+    if ($rootdev=~ /^\/dev\/[hs]d[a-d]+$/ &&
+	$rootpartnumber > 0 && 
+	$rootpartnumber < 21)
+    {
+	print "
+# /etc/fstab: static file system information.
+#
+# <file system> <mount point>   <type>  <options>               <dump>  <pass>
+proc            /proc           proc    defaults                0       0
+/dev/fd0        /floppy         auto    user,noauto             0       0
+/dev/cdrom      /cdrom          iso9660 ro,user,noauto          0       0
+$rootdev$rootpartnumber       /               ext2    errors=remount-ro       0       0";
+	if ($swapdevnumber>0 &&
+	    $swapdevnumber<21)   
+	{
+	    print "
+$rootdev$swapdevnumber       none            swap    sw                      0       0";    
+	}
+    }
+    else
+    {
+	print "Error checking $rootdev\n";
+	exit 1;
+    }
+	print "\n";
+}
+
+
+sub printvalidfdisk($)
+{
+    my $partitionfile=shift;
+    my %disk;	
+    %disk=loadpartitionfile($partitionfile);
+    checkcorrectness(\%disk);
+    #printpart(\%disk);
+    printfdiskdeleteprimary();
+    printfdiskformat(\%disk);
+    printfdiskwrite();
+}
+
+sub checkcorrectness($)
+{
+    my $diskref=shift;
+    my %disk=%$diskref;    
+    my $key1;
+    my $key2;
+    my $key3;
+    my $key4;
+    my $tmphash1;
+    my $tmphash2;
+    my $tmphash3;
+    
+    my $numberofprimarypart=0;
+    my $numberofextendedpart=0;
+    my $numberoflogicalpart=0;
+    my $sizeoflogical=0;
+    my $sizeofprimary=0;
+    my $sizeofdisk=0;
+    my $actualpartnumber=0;
+    #disk 
+    foreach $key1 (sort keys %disk)
+    {
+	$tmphash1 = $disk{$key1};
+	if (ref($tmphash1) eq 'HASH')
+	{
+	    #partition
+	    foreach $key2 (sort keys %$tmphash1)
+	    {
+		$tmphash2 = $$tmphash1{$key2};		
+		$actualpartnumber=$key2;
+		if (ref($tmphash2) eq 'HASH')
+		{
+		    #attribute of partition
+		    foreach $key3 (sort keys %$tmphash2) 
+		    {
+			if ($$tmphash2{$key3} eq "primary")
+			{
+			    $numberofprimarypart++;			    
+			}
+			if ($$tmphash2{$key3} eq "extended")
+			{
+			    $numberofextendedpart++;
+			}
+			if ($$tmphash2{$key3} eq "logical")
+			{
+			    $numberoflogicalpart++;
+			}
+			if ($actualpartnumber<5 &&
+			    ($key3 eq "size")
+			    )
+			    
+			{
+			    $sizeofprimary+=$$tmphash2{$key3};
+			}
+			if ($actualpartnumber>=5 &&
+			    ($key3 eq "size")			    
+			    )
+			{
+			    $sizeoflogical+=$$tmphash2{$key3};
+			}			
+		    }
+		}
+	    }
+	}
+	else
+	{
+	    if ($key1 eq "size")
+	    {
+		$sizeofdisk=$disk{$key1};
+	    }
+	}
+    }
+    if ($numberofprimarypart + $numberofextendedpart > 4)
+    {
+	print STDERR "Error too much primary or extended partition.\n";
+	exit 1;
+    }
+    if ($sizeofdisk<$sizeofprimary ||
+	$sizeofdisk<$sizeoflogical)
+    {
+	print STDERR "Error size of disk < size of partition\n";
+	exit 1;
+    }
+
+print STDERR "primary part                  : $numberofprimarypart\n";
+print STDERR "extended part                 : $numberofextendedpart\n";
+print STDERR "logical part                  : $numberoflogicalpart\n";
+print STDERR "size of disk                  : $sizeofdisk\n";    
+print STDERR "size of primary and extended  : $sizeofprimary\n";    
+print STDERR "size of logical               : $sizeoflogical\n";    
+
+}
+
+sub loadpartitionfile($)
+{
+    my $partitionfile=shift;
+    my $line;
+    my %disk;
+    my %partitions;
+    $disk{partition}=\%partitions;
+
+    my ($number,$size,$fdisktype,$label,$type);
+    my $linecorrect=0;
+    my @listnumber;
+    my $sizeofextended=0;
+    my $sizeoflogical=0;
+    my $sizeofprimary=0;
+    my $numberofprimary=0;
+    my $numberofextended=0;
+    my $numberoflogical=0;
+
+    my $tmpnumber;
+    $type="";
+
+    if (open(FH,$partitionfile))
+    {
+	foreach $line (<FH>)
+	{
+	    my $linenotseen=1;
+	    my %partition;
+
+	    if ($numberofextended > 1) { print STDERR "ERROR you can only have one extended part\n"; exit 1; }
+	    if ($numberofprimary > 4   ) { print STDERR "ERROR you can only have four primary part\n"; exit 1; }
+	    if ($numberofprimary + $numberofextended > 4   ) { print STDERR "ERROR you can only have four part (primary + extended)\n"; exit 1; }
+	    if ($numberofextended == 0 && $numberoflogical > 0 ) 
+	    { print STDERR "ERROR extended partition must be defined before logical\n"; exit 1; }
+
+	    if($line =~ /^([hs]d[a-z])[\s\t]+size=([0-9]+)[\t\s]*$/)
+	    {
+		$disk{name}=$1;
+		$disk{size}=$2;
+		$linecorrect=1;
+	    }
+
+	    if ($line =~ /^part=([0-9]+)[\t\s]+size=([0-9]+)[\t\s]+fdisktype=([0-9a-zA-Z]+)[\t\s]+label=([a-zA-Z]+)[\t\s]+type=([a-zA-Z]+)[\t\s]*$/)
+	    {
+		($number,$size,$fdisktype,$label,$type)=($1,$2,$3,$4,$5);
+		if ($type eq "logical" && $number < 4) { print STDERR "ERROR logical part begin at 5\n"; $linecorrect=0;}
+		if ($type eq "primary" && $number > 4) { print STDERR "ERROR primary part must be [1..4]\n"; $linecorrect=0;}
+		if ($type eq "primary") { $numberofprimary++; $sizeofprimary+=$size; }
+		if ($type eq "logical") { $sizeoflogical+=$size; $numberoflogical++; }
+		foreach $tmpnumber (@listnumber)
+		{
+		    if ($tmpnumber==$number) { print STDERR "ERROR part=$number already defined\n"; $linecorrect=0; }
+		}
+		@listnumber=(@listnumber,$number);
+		$linecorrect=1;
+	    }
+		
+	    if ($line =~/^part=([0-9]+)[\t\s]+size=([0-9]+)[\t\s]+label=([a-zA-Z]+)[\t\s]+type=(extended)[\t\s]*$/)
+	    {
+		($number,$size,$label,$type)=($1,$2,$3,$4);
+		if ($number > 4) { print STDERR "ERROR extended partition must be in [1..4]\n"; $linecorrect=0; }
+		if ($type eq "extended") { $numberofextended++; $sizeofextended=$size; }
+		foreach $tmpnumber (@listnumber)
+		{
+		    if ($tmpnumber==$number) { print STDERR "ERROR part=$number already defined\n"; $linecorrect=0; }
+		}
+		@listnumber=(@listnumber,$number);
+		$linecorrect=1;
+	    }
+	    if ($line =~ /^$/ ||
+		$line =~ /^\#/)
+	    { $linecorrect=1; }
+
+	    if ($linecorrect==0)
+	    {
+		print STDERR "ERROR in line :\n$line";
+		exit 1;
+	    }
+
+
+	    if (
+		(
+		 $type eq "primary"  ||
+		 $type eq "logical"
+		 ) &&
+		$linecorrect
+		)
+	    {	
+		%partition=(
+			    number    => $number,
+			    size      => $size,
+			    fdisktype => $fdisktype,
+			    label     => $label,
+			    type      => $type,
+			    );
+		$disk{partition}{$partition{number}}=\%partition;
+	    }
+	    if ($linecorrect &&
+		$type eq "extended")
+	    {
+		%partition=(
+			    number    => $number,
+			    size      => $size,
+			    label     => $label,
+			    type      => $type,
+			    );
+		$disk{partition}{$partition{number}}=\%partition;
+	    }	    
+	    $linecorrect=0;
+	}
+	close(FH);
+    }
+    else
+    {
+	print "Error opening $partitionfile\n";
+	exit 1;
+    }
+    if ($sizeoflogical >= $sizeofextended &&
+	$numberofextended > 0 &&
+	$numberoflogical  > 0	
+	) 
+    { print STDERR "ERROR size of extended part <= size of logical part\nsizeofextended $sizeofextended\nsizeoflogical $sizeoflogical\n"; exit 1; }
+    return %disk;
+}
+
+sub getlinuxswapdevicenumber($)
+{
+    my $diskref=shift;
+    my %disk=%$diskref;
+    my $swapdev=0;
+    my $key1;
+    my $key2;
+    my $key3;
+    my $key4;
+    my $tmphash1;
+    my $tmphash2;
+    my $tmphash3;
+    foreach $key1 (sort keys %disk)
+    {
+	$tmphash1 = $disk{$key1};
+	if (ref($tmphash1) eq 'HASH')
+	{
+	    foreach $key2 (sort keys %$tmphash1)
+	    {		    
+		$tmphash2 = $$tmphash1{$key2};
+		if (ref($tmphash2) eq 'HASH')
+		{
+		    foreach $key3 (sort keys %$tmphash2) 
+		    {
+			if ($key3 eq "fdisktype" &&
+			    $$tmphash2{$key3} == 82)
+			{
+			    return $key2; # device number : 7 => /dev/hda7
+			}
+		    }
+		}
+	    }
+	}
+	
+    }
+}
+
+
+
+
+sub printpart($)
+{
+    my $diskref=shift;
+    my %disk=%$diskref;    
+    my $key1;
+    my $key2;
+    my $key3;
+    my $key4;
+    my $tmphash1;
+    my $tmphash2;
+    my $tmphash3;
+    foreach $key1 (sort keys %disk)
+    {
+	$tmphash1 = $disk{$key1};
+	if (ref($tmphash1) eq 'HASH')
+	{
+	    foreach $key2 (sort sort_par_num keys %$tmphash1)
+	    {
+		print "\t$key1=$key2\n";		    
+		$tmphash2 = $$tmphash1{$key2};
+		if (ref($tmphash2) eq 'HASH')
+		{
+		    foreach $key3 (sort keys %$tmphash2) 
+		    {
+			print "\t\t$key3=".$$tmphash2{$key3}."\n";
+		    }
+		}
+	    }
+	}
+	else
+	{
+	    print "$key1=$disk{$key1}\n";
+	}
+    }
+}
+
+
+sub printpreinstallconf($)
+{
+    my $partitionfile=shift;
+    my %disk;	
+    my $output="";
+    my $key1;
+    my $key2;
+    my $key3;
+    my $key4;
+    my $tmphash1;
+    my $tmphash2;
+    my $tmphash3;
+    my $do_fdisk_on_deploy=libkadeploy2::conflib::get_conf("do_fdisk_on_deploy");
+    my $HARDDRIVE;
+    my $SWAP_DEV;
+    my $TMP_DEV;
+    my $SCRATCH_DEV;
+
+    %disk=loadpartitionfile($partitionfile);
+    checkcorrectness(\%disk);
+    foreach $key1 (sort keys %disk)
+    {
+	$tmphash1 = $disk{$key1};
+	if (ref($tmphash1) eq 'HASH')
+	{
+	    foreach $key2 (sort sort_par_num keys %$tmphash1)
+	    {	
+		$tmphash2 = $$tmphash1{$key2};
+		if (ref($tmphash2) eq 'HASH')
+		{
+		    foreach $key3 (sort keys %$tmphash2) 
+		    {
+			if ($key3 eq "label")
+			{
+			    if ($$tmphash2{$key3} eq "swap")
+			    {
+				$SWAP_DEV="$HARDDRIVE$key2";
+			    }
+			    if ($$tmphash2{$key3} eq "scratch")
+			    {
+				$SCRATCH_DEV="$HARDDRIVE$key2";
+			    }
+			    if ($$tmphash2{$key3} eq "tmp")
+			    {
+				$TMP_DEV="$HARDDRIVE$key2";
+			    }
+
+			}
+
+		    }
+		}
+	    }
+	}
+	else
+	{
+	    if ($key1 eq "name")
+	    {
+		$HARDDRIVE="/dev/$disk{$key1}";
+	    }
+	}
+    }
+    if ($HARDDRIVE)
+    {
+	$output.="HARDDRIVE=$HARDDRIVE\n";
+	if ($do_fdisk_on_deploy eq "yes") { $output.="DO_FDISK=1\n"; } else { $output.="DO_FDISK=0\n"; }
+	if ($SWAP_DEV)    { $output.="SWAP_FORMAT=1\nSWAP_DEV=$SWAP_DEV\n"; }
+	if ($SCRATCH_DEV) { $output.="SCRATCH_FORMAT=1\nSCRATCH_FS=ext2\nSCRATCH_DEV=$SCRATCH_DEV\n"; }
+	if ($TMP_DEV)     { $output.="TMP_FORMAT=1\nTMP_FS=ext2\nTMP_DEV=$TMP_DEV\n"; }
+    }
+    print "$output";
+}
+
+
+sub printfdiskformat($)
+{
+    my $diskref=shift;
+    my %disk=%$diskref;    
+    my $key1;
+    my $key2;
+    my $key3;
+    my $key4;
+    my $tmphash1;
+    my $tmphash2;
+    my $tmphash3;
+    
+    my $type;
+    my $partnumber;
+    my $size;
+    my $fdisktype;
+        
+    my $fdiskversion="2.12";
+    
+    print STDERR "WARNING this script work only with fdisk 2.12\n";
+
+    foreach $key1 (sort keys %disk)
+    {
+	$tmphash1 = $disk{$key1};
+	if (ref($tmphash1) eq 'HASH')
+	{
+	    foreach $key2 (sort sort_par_num keys %$tmphash1)
+	    {
+#		print "\t$key1=$key2\n";
+		$partnumber=$key2;
+		$tmphash2 = $$tmphash1{$key2};
+		if (ref($tmphash2) eq 'HASH')
+		{
+		    foreach $key3 (sort keys %$tmphash2) 
+		    {
+			if ($key3 eq "number")
+			{
+			    $partnumber=$$tmphash2{$key3};
+			}
+			if ($key3 eq "fdisktype")
+			{
+			    $fdisktype=$$tmphash2{$key3}
+			}
+			if ($key3 eq "size")
+			{			    
+			    $size=$$tmphash2{$key3};
+			    $size=int($size/1.1); #Stupid hack for fdisk because of this fucking 1000 and 1024 ...
+			    $size="+".$size."M";
+			}
+			if ($key3 eq "type")
+			{
+			    if ($$tmphash2{$key3} eq "primary")
+			    {
+				$type="p";
+			    }
+			    if ($$tmphash2{$key3} eq "extended")
+			    {
+				$type="e";
+			    }
+			    if ($$tmphash2{$key3} eq "logical")
+			    {
+				$type="l";
+			    }
+
+
+			}
+#			print "\t\t$key3=".$$tmphash2{$key3}."\n";			
+		    }
+		    if ($type eq "p" ||
+			$type eq "e")
+		    {
+			if ($partnumber!=4)
+			{
+			    
+			    print "n
+$type
+$partnumber
+
+$size
+";
+			}
+			else
+			{			    
+			    print "n
+$type
+
+$size
+";		    
+			}		    
+		    }		
+		    if ($type eq "l")
+		    {
+			print "n
+$type
+
+$size
+";			
+		    }
+		    if (!($type eq "e"))
+		    {
+			if ($partnumber==1)
+			{
+			    print "t
+$fdisktype
+";
+			}
+			else
+			{
+			    print "t
+$partnumber
+$fdisktype
+";
+			}
+		    }
+		}
+	    }
+	}
+	else
+	{
+#	    print "$key1=$disk{$key1}\n";
+	}
+    }
+    
+}
+
+
+sub printfdiskdeleteprimary()
+{
+    print "d
+1
+d
+2
+d
+3
+d
+4
+";
+}
+
+sub printfdiskwrite()
+{
+    print "p
+w
+";
+}
+
+
+
+
+sub createtftp()
+{
+    my $kadeployuser;
+    my $kadeploydir; 
+    my $tftpdir;
+    my $pxedir;
+    my $tftpbootdir;
+    my $pxelinux;
+    my $memdisk;
+    my $deployx86;
+    my $deployx8664;
+
+    $kadeployuser=libkadeploy2::conflib::get_conf("deploy_user");
+    $kadeploydir=libkadeploy2::conflib::get_conf("kadeploy2_directory");
+    $tftpdir=libkadeploy2::conflib::get_conf("tftp_repository");
+    $pxedir=$tftpdir."/".libkadeploy2::conflib::get_conf("pxe_rep");
+    $tftpbootdir=$tftpdir."/".libkadeploy2::conflib::get_conf("tftp_relative_path");
+    $pxelinux="$kadeploydir/lib/pxelinux/pxelinux.0";
+    $memdisk="$kadeploydir/lib/pxelinux/memdisk";
+    $deployx86="$kadeploydir/lib/deployment_kernel/x86/";
+    $deployx8664="$kadeploydir/lib/deployment_kernel/x86_64/";
+
+
+    system("mkdir -p $tftpdir");
+    system("mkdir -p $pxedir");
+    system("mkdir -p $tftpbootdir");
+
+    system("cp $pxelinux $tftpdir");
+    system("cp $memdisk  $tftpbootdir");
+    system("cp $deployx86/*   $tftpbootdir");
+    system("cp $deployx8664/* $tftpbootdir");
+    system("chown -R $kadeployuser $tftpdir");
+    print("Done !!!!\n");
+
+}
+
+
+sub printvalidsudoers()
+{
+    my $kadeploydir=libkadeploy2::conflib::get_conf("kadeploy2_directory");
+    my $kadeployuser=libkadeploy2::conflib::get_conf("deploy_user");
+    my $tmpcmd;
+    my $i;
+    print "
+Cmnd_Alias DEPLOYCMDUSER = ";
+    for ($i=0; $i<=$#listfiletowrapuser; $i++)
+    {
+	print "$kadeploydir/bin/$listfiletowrapuser[$i]";
+	if ($i!=$#listfiletowrapuser) { print ", "; }
+    }    
+    print ",$kadeploydir/sbin/setup_pxe.pl";
+    print "\n";
+
+
+    print "
+Cmnd_Alias DEPLOYCMDROOT = ";
+    for ($i=0; $i<=$#listfiletowraproot; $i++)
+    {
+	print "$kadeploydir/sbin/$listfiletowraproot[$i]";
+	if ($i!=$#listfiletowraproot) { print ", "; }
+    }    
+    print "\n";
+
+    print "
+ALL ALL=($kadeployuser) NOPASSWD: DEPLOYCMDUSER
+root ALL = (ALL) ALL
+\n";
+
+}
+
+sub check_etc_deploy()
+{
+  my $ok=1;
+
+  if (! -d $kadeploy_config_dir) {
+    print "kadeploy configuration directory $kadeploy_config_dir is not created\n";
+    $ok=0;
+  }
+
+  if (! -e $deployconf) {
+    print "$deployconf not found\n";
+    $ok=0;
+  }
+
+  if ( ! -e $deploycmdconf) {
+    print "$deploycmdconf not found\n";
+    $ok=0;
+  }
+  return($ok);
+}
+
+sub checkbinfiles()
+{
+     my $file;
+     my $command;
+     my $ret=1;
+     my @filetocheck=("DKsentinelle",
+		      "mcatseg");
+     foreach $file (@filetocheck)
+     {
+	 $command="ls /usr/local/bin/$file";
+	 if (system($command)!=0)
+	 {
+	     $ret=0;
+	 }
+     }
+     return $ret;
+}
+
+sub copybinfiles()
+{
+    my $kadeploy2_directory;
+    my $file;
+    my $command;
+    my $line;
+    my $arch;
+    $kadeploy2_directory=libkadeploy2::conflib::get_conf("kadeploy2_directory");
+    
+    my @filetocopy=("DKsentinelle",
+		    "mcatseg");
+    
+    open(FH,"uname -a |") or die "Can't exec uname -a";
+    $line=<FH>;
+    if ($line=~/^Linux .+2\.6\..+ i686/)   { $arch="i686"; }
+    if ($line=~/^Linux .+2\.6\..+ x86_64/) { $arch="x86_64"; }
+    foreach $file (@filetocopy)
+    {
+	#Priorite au fichier compiler sur en local
+	if (! -f "/usr/local/bin/$file")
+	{
+	    if (-f "$kadeploy2_directory/bin/$file")	
+	    {
+		$command="cp $kadeploy2_directory/bin/$file /usr/local/bin/$file";
+	    }
+	    elsif (-f "$kadeploy2_directory/bin/$file-$arch")
+	    {
+		$command="cp $kadeploy2_directory/bin/$file-$arch /usr/local/bin/$file";
+	    }
+	    else
+	    {
+		print "ERROR : Your distribution is not supported... try to build $file\n";
+		exit 1;
+	    }
+	    print "Exec : $command\n";
+	    system($command);
+	}
+	else
+	{
+	    print "/usr/local/bin/$file already exist\n";
+	}
+    }
+}
+
+
+sub sudowrapping()
+{
+    
+    my $kadeploy2_directory;
+    my $file;
+    my $command;
+    my $pathfile;
+    $kadeploy2_directory=libkadeploy2::conflib::get_conf("kadeploy2_directory");
+    
+
+    
+    foreach $file (@listfiletowrapuser)
+    {
+	$pathfile="/usr/local/bin/$file";
+	if ( ! -e $pathfile)
+	{
+	    $command="ln -s $kadeploy2_directory/bin/kasudowrapper.sh $pathfile";
+	    print STDERR "Exec : $command\n";
+	    system($command);
+	}
+	else
+	{
+	    print STDERR "$pathfile exist\n";
+	}
+    }
+
+    foreach $file (@listfiletowraproot)
+    {
+	$pathfile="/usr/local/sbin/$file";
+	if ( ! -e $pathfile)
+	{
+	    $command="ln -s $kadeploy2_directory/bin/kasudowrapper.sh $pathfile";
+	    print STDERR "Exec : $command\n";
+	    system($command);
+	}
+	else
+	{
+	    print STDERR "$pathfile exist\n";
+	}
+    }
+
+
+    $command="$kadeploy2_directory/sbin/kasetup -exportenv";
+    print "Exec : $command\n";
+    system($command);
+}
+
+
+sub checkDKsentinelle()
+{
+    my $DK="/usr/local/bin/DKsentinelle";    
+    my $line;
+    my $ok;
+    #CHECK DKsentinelle 
+    if ( -x "$DK" &&
+	 ( ! -l "$DK") && 
+	 open(FH,"$DK -h 2>&1|") )
+    {
+	while ($line=<FH>) { }
+	close(FH);
+	print "* DKsentinelle was found\n";
+    }
+    else
+    {
+	print "* You have to copy DKsentinelle to $DK... And check if it works.\n";
+	$ok=0;
+    }
+    return $ok; 
+}
+
+
+sub checkdeployconf()
+{
+    my $kadeploy2_directory;
+    my $tftpdir;
+    my $pxe_rep;
+    my $deploy_user;
+    my $userok=0;
+    my $ok=1;
+    my $line;
+    my $remotesentinelle;
+    my $remotemcat;
+    my $deploy_sentinelle_cmd;
+    my $prod_sentinelle_cmd;
+    my $DK="/usr/local/bin/DKsentinelle";    
+    my $RMC="/usr/local/bin/mcatseg";
+    my $pre_install_archive;
+    my $post_install_archive;
+    my $tftp_relative_path;
+    my $user;
+
+    $kadeploy2_directory=libkadeploy2::conflib::get_conf("kadeploy2_directory");
+    $deploy_user=libkadeploy2::conflib::get_conf("deploy_user");
+    $tftpdir=libkadeploy2::conflib::get_conf("tftp_repository");
+    $pxe_rep=libkadeploy2::conflib::get_conf("pxe_rep");
+    $remotesentinelle=libkadeploy2::conflib::get_conf("remote_sentinelle_rsh");
+    $remotemcat=libkadeploy2::conflib::get_conf("remote_mcat");
+    $deploy_sentinelle_cmd=libkadeploy2::conflib::get_conf("deploy_sentinelle_cmd");
+    $prod_sentinelle_cmd=libkadeploy2::conflib::get_conf("prod_sentinelle_cmd");
+    $pre_install_archive=libkadeploy2::conflib::get_conf("pre_install_archive");
+    $post_install_archive=libkadeploy2::conflib::get_conf("post_install_archive");
+    $tftp_relative_path=libkadeploy2::conflib::get_conf("tftp_relative_path");
+    $user=$ENV{USER};
+
+    #CHECK KADEPLOY DIR
+    if (! -d $kadeploy2_directory)
+    {
+	print "* kadeploy directory $kadeploy2_directory not found.\n";
+	$ok=0;	
+    }
+    else
+    {
+	print "* kadeploy directory $kadeploy2_directory exist.\n";
+    }
+
+    #CHECK USER
+    if (open(FH,"getent passwd | grep $deploy_user |"))
+    {
+	while ($line=<FH>)
+	{
+	    if ($line=~/^$deploy_user/)
+	    {
+		$userok=1;
+	    }
+	}
+	close(FH);
+	if ($userok) { 	print "* $deploy_user user exist.\n"; }
+    }
+    else
+    {
+	print "* $deploy_user user don't exist.\n";	
+	$ok=0;
+	return $ok;
+    }
+
+#    if (!($user eq $deploy_user))
+#    {
+#	print "* WARNING you have to be $deploy_user user !!!\n";
+#    }
+#    else
+#    {
+#	print "* You are $deploy_user user.\n";
+#    }
+
+
+    #CHECK TFTP
+    if (! -d  $tftpdir)
+    {
+	print "* tftp directory $tftpdir not found\n";
+	$ok=0;
+    }
+    else
+    {
+	print "* tftp directory $tftpdir exist.\n";       
+    }
+    #CHECK TFTP PXE
+    if (! -d $tftpdir.$pxe_rep)
+    {
+	print "* pxe directory ".$tftpdir.$pxe_rep." not found.\n";
+	$ok=0;
+    }
+    else
+    {
+	print "* pxe directory ".$tftpdir.$pxe_rep. " exist.\n";
+    }
+    #CHECK TFTP PXE WRITE ACCESS
+    if (! -w $tftpdir.$pxe_rep)
+    {
+	print "* pxe directory ".$tftpdir.$pxe_rep." not writable.\n";
+	$ok=0;
+    }
+    else
+    {
+	print "* pxe directory ".$tftpdir.$pxe_rep. " writable.\n";
+    }
+
+    #CHECK TFTP PXE BOOT
+    if (! -d $tftpdir.$tftp_relative_path)
+    {
+	print "* tftp relative path ".$tftpdir.$tftp_relative_path." not found.\n";
+	$ok=0;
+    }
+    else
+    {
+	print "* tftp relative path ".$tftpdir.$tftp_relative_path. " exist.\n";
+    }
+    if (! -w $tftpdir.$tftp_relative_path)
+    {
+	print "* tftp relative path ".$tftpdir.$tftp_relative_path." not writable.\n";
+	$ok=0;
+    }
+    else
+    {
+	print "* tftp relative path ".$tftpdir.$tftp_relative_path. " writable.\n";
+    }
+
+
+    
+    if ($remotesentinelle eq $DK)
+    {
+	print "* remote_sentinelle_rsh is correct.\n";
+    }
+    else
+    {
+	print "* remote_sentinelle_rsh must be $DK.\n";
+	$ok=0;
+	return $ok;
+    }
+
+    if ($deploy_sentinelle_cmd eq $DK)
+    {
+	print "* deploy_sentinelle_cmd is correct.\n";
+    }
+    else
+    {
+	print "* deploy_sentinelle_cmd is not correct, set it to $DK.\n";
+	$ok=0;
+	return $ok;
+    }
+
+    if ($prod_sentinelle_cmd eq $DK)
+    {
+	print "* prod_sentinelle_cmd is correct.\n";
+    }
+    else
+    {
+	print "* prod_sentinelle_cmd is not correct, set it to $DK.\n";
+	$ok=0;
+	return $ok;
+    }
+
+
+    #CHECK MCAT
+    if ($remotemcat eq $RMC)
+    {
+	print "* remote_mcat is correct.\n";
+    }
+    else
+    {
+	print "* remote_mcat must be $RMC.\n";
+	$ok=0;
+	return $ok;
+    }
+    
+    #CHECK PREINSTALL
+    if (-e $pre_install_archive)
+    {
+	print "* pre_install_archive exist.\n";
+    }
+    else
+    {
+	print "* You have to correct your pre_install_archive path.\n";
+	$ok=0;
+	return $ok;
+    }
+
+    #CHECK POSTINSTALL
+    if (-e $post_install_archive)
+    {
+	print "* post_install_archive exist.\n";
+    }
+    else
+    {
+	print "* You have to correct your post_install_archive path.\n";
+	$ok=0;	
+	return $ok;
+    }
+
+    print "\n";
+
+    return $ok;       
+}
+
+
+sub checksudoers()
+{
+    my $sudoers="/etc/sudoers";
+    my $ok=1;
+
+    if ( -e $sudoers)
+    {
+	print "* sudoers exist\n";
+    }
+    else
+    {
+	print "* sudoers was not found : $sudoers\n";
+	$ok=0;
+    }
+
+    return $ok;
+}
+
+sub checkwriteaccess()
+{
+    my $tftp_repository;
+    my $pxe_rep;
+    $tftp_repository=libkadeploy2::conflib::get_conf("tftp_repository");
+    $pxe_rep=libkadeploy2::conflib::get_conf("pxe_rep");
+}
+
+sub help()
+{
+	print "$0
+\t-checkdeployconf                                      Check $deployconf
+\t-checksudoers                                         Print a valid sudoers
+\t-copybinfiles                                         Copy required files in /usr/local/bin
+\t-sudowrapping                                         Wrap files with kasudowrapper.sh
+\t-printvalidsudoers                                    Generate a sudoers from deploy.conf
+\t-createtftp                                           Copy all the files required for tftp boot
+\t-exportenv                                            Export environment variable file for sudowrapping (this is done after sudowrapping)
+\t-chmodconf                                            Put correct write on configuration files
+\t-printpreinstallconf                                  Print preinstall configuration file
+\t-printvalidfdisk                                      Print a fdisk file from
+\t-loadpartitionfile                                    Load a custom partition file
+\t-printvalidfstab                                      Generate a fstab for linux with rootfs parameters
+\t\t-rootdev                                              Boot device (ex: /dev/hda)
+\t\t-rootpartnumber                                       Boot device partnumber (ex : 2)
+\t[-C|--configuration <configuration root directory>]   Configuration root directory\n
+";
+}
+

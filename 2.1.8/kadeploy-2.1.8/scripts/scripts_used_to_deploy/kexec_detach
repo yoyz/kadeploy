@@ -1,0 +1,12 @@
+#!/bin/sh
+
+kernelPath=$1
+initrdPath=$2
+shift
+shift
+destPartAndParams=$@
+
+#echo "Setting Kexec parameters"
+kexec -l $kernelPath --initrd=$initrdPath --append="root=$destPartAndParams"
+#echo "Running Kexec"
+start-stop-daemon -S -x /usr/local/bin/run_kexec -b
